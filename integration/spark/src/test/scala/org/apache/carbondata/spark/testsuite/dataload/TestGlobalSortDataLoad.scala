@@ -20,6 +20,8 @@ package org.apache.carbondata.spark.testsuite.dataload
 import scala.collection.JavaConverters._
 import java.io.{File, FileWriter}
 
+import scala.collection.mutable
+
 import org.apache.commons.io.FileUtils
 import org.apache.hadoop.conf.Configuration
 
@@ -89,6 +91,8 @@ class TestGlobalSortDataLoad extends QueryTest with BeforeAndAfterEach with Befo
     sql("DROP TABLE IF EXISTS carbon_globalsort_minor")
     sql("DROP TABLE IF EXISTS carbon_globalsort_major")
     sql("DROP TABLE IF EXISTS carbon_globalsort_custom")
+    sql("drop table if exists source")
+    sql("drop table if exists sink")
   }
 
   // ----------------------------------- Compare Result -----------------------------------
@@ -468,6 +472,36 @@ class TestGlobalSortDataLoad extends QueryTest with BeforeAndAfterEach with Befo
       sql("SELECT * FROM carbon_localsort_difftypes ORDER BY shortField"))
   }
 
+  // CARBONDATA-3909 fix data load failure with null value for decimal type
+  test("test global sort with null values") {
+    sql("drop table if exists source")
+    sql("drop table if exists sink")
+    sql("create table source(a string, b int, c int, d int, e int, f int, dec decimal(3,2), arr array<string>, str struct<a:string>, map map<string, string>) stored as carbondata TBLPROPERTIES('bad_record_action'='force')")
+    sql("insert into source select 'k','k', 'k','k','k', 'k',null,null,null,map('null','null')")
+    sql("create table sink (a string, b string, c int, d bigint, e double, f char(5),  dec decimal(3,2), arr array<string>, str struct<a:string>, map map<string, string>) stored as carbondata TBLPROPERTIES('sort_scope'='global_sort', 'sort_columns'='b,c,d,f')")
+    sql("insert into sink select * from source")
+    checkAnswer(sql("select * from sink"), Row("k", null, null,null,null, null, null, mutable.WrappedArray.make(Array(null)), Row(null), Map("null" -> "null")))
+  }
+
+  test("test global sort compaction, clean files, update delete") {
+    sql("DROP TABLE IF EXISTS carbon_global_sort_update")
+    sql(
+      """
+        | CREATE TABLE carbon_global_sort_update(id INT, name STRING, city STRING, age INT)
+        | STORED AS carbondata TBLPROPERTIES('SORT_SCOPE'='GLOBAL_SORT', 'sort_columns' = 'name, city')
+      """.stripMargin)
+    sql(s"LOAD DATA LOCAL INPATH '$filePath' INTO TABLE carbon_global_sort_update")
+    sql(s"LOAD DATA LOCAL INPATH '$filePath' INTO TABLE carbon_global_sort_update")
+    sql("alter table carbon_global_sort_update compact 'major'")
+    sql("clean files for table carbon_global_sort_update")
+    assert(sql("select * from carbon_global_sort_update").count() == 24)
+    val updatedRows = sql("update carbon_global_sort_update d set (id) = (id + 3) where d.name = 'd'").collect()
+    assert(updatedRows.head.get(0) == 2)
+    val deletedRows = sql("delete from carbon_global_sort_update d where d.id = 12").collect()
+    assert(deletedRows.head.get(0) == 2)
+    assert(sql("select * from carbon_global_sort_update").count() == 22)
+  }
+  
   private def resetConf() {
     CarbonProperties.getInstance()
       .removeProperty(CarbonCommonConstants.LOAD_SORT_SCOPE)

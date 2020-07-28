@@ -275,6 +275,11 @@ public class Segment implements Serializable, Writable {
     return null;
   }
 
+  public static Segment getSegment(String segmentNo, String segmentFileName,
+      ReadCommittedScope readCommittedScope) {
+    return new Segment(segmentNo, segmentFileName, readCommittedScope);
+  }
+
   public Configuration getConfiguration() {
     return readCommittedScope.getConfiguration();
   }
@@ -307,6 +312,10 @@ public class Segment implements Serializable, Writable {
 
   public LoadMetadataDetails getLoadMetadataDetails() {
     return loadMetadataDetails;
+  }
+
+  public void setLoadMetadataDetails(LoadMetadataDetails loadMetadataDetails) {
+    this.loadMetadataDetails = loadMetadataDetails;
   }
 
   public long getIndexSize() {

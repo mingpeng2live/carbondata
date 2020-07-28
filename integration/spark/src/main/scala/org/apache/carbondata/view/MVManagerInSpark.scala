@@ -28,7 +28,7 @@ import org.apache.carbondata.core.view.MVManager
 
 class MVManagerInSpark(session: SparkSession) extends MVManager {
   override def getDatabases: util.List[String] = {
-    CarbonUtils.threadSet(CarbonCommonConstants.DISABLE_SQL_REWRITE, "true")
+    CarbonUtils.threadSet(CarbonCommonConstants.CARBON_ENABLE_MV, "true")
     try {
       val databaseList = session.catalog.listDatabases()
       val databaseNameList = new util.ArrayList[String]()
@@ -37,7 +37,7 @@ class MVManagerInSpark(session: SparkSession) extends MVManager {
       }
       databaseNameList
     } finally {
-      CarbonUtils.threadUnset(CarbonCommonConstants.DISABLE_SQL_REWRITE)
+      CarbonUtils.threadUnset(CarbonCommonConstants.CARBON_ENABLE_MV)
     }
   }
 
@@ -48,23 +48,14 @@ class MVManagerInSpark(session: SparkSession) extends MVManager {
 
 object MVManagerInSpark {
 
-  private val MANAGER_MAP_BY_SESSION =
-    new util.HashMap[SparkSession, MVManagerInSpark]()
+  private var viewManager: MVManagerInSpark = null
 
+  // returns single MVManager instance for all the current sessions.
   def get(session: SparkSession): MVManagerInSpark = {
-    var viewManager = MANAGER_MAP_BY_SESSION.get(session)
     if (viewManager == null) {
-      MANAGER_MAP_BY_SESSION.synchronized {
-        viewManager = MANAGER_MAP_BY_SESSION.get(session)
+      this.synchronized {
         if (viewManager == null) {
           viewManager = new MVManagerInSpark(session)
-          MANAGER_MAP_BY_SESSION.put(session, viewManager)
-          session.sparkContext.addSparkListener(new SparkListener {
-            override def onApplicationEnd(applicationEnd: SparkListenerApplicationEnd): Unit = {
-              CarbonEnv.carbonEnvMap.remove(session)
-              ThreadLocalSessionInfo.unsetAll()
-            }
-          })
         }
       }
     }

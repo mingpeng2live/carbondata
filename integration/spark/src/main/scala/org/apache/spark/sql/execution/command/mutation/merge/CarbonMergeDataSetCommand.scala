@@ -46,9 +46,12 @@ import org.apache.spark.util.{AccumulatorContext, AccumulatorMetadata, LongAccum
 import org.apache.carbondata.common.logging.LogServiceFactory
 import org.apache.carbondata.core.constants.{CarbonCommonConstants, CarbonLoadOptionConstants}
 import org.apache.carbondata.core.datastore.impl.FileFactory
+import org.apache.carbondata.core.index.Segment
 import org.apache.carbondata.core.metadata.schema.table.CarbonTable
 import org.apache.carbondata.core.mutate.CarbonUpdateUtil
+import org.apache.carbondata.core.statusmanager.SegmentStatusManager
 import org.apache.carbondata.core.util.CarbonProperties
+import org.apache.carbondata.core.util.path.CarbonTablePath
 import org.apache.carbondata.processing.loading.FailureCauses
 
 /**
@@ -164,7 +167,7 @@ case class CarbonMergeDataSetCommand(
         processedRDD)(sparkSession))
 
     loadDF.cache()
-    loadDF.count()
+    val count = loadDF.count()
     val updateTableModel = if (FileFactory.isFileExist(deltaPath)) {
       val deltaRdd = sparkSession.read.format("carbon").load(deltaPath).rdd
       val tuple = mutationAction.handleAction(deltaRdd, executorErrors, trxMgr)
@@ -175,18 +178,31 @@ case class CarbonMergeDataSetCommand(
         LOGGER.error("writing of update status file failed")
         throw new CarbonMergeDataSetException("writing of update status file failed")
       }
+      if (carbonTable.isHivePartitionTable) {
+        // If load count is 0 and if merge action contains delete operation, update
+        // tableUpdateStatus file name in loadMeta entry
+        if (count == 0 && hasDelAction && !tuple._1.isEmpty) {
+          val loadMetaDataDetails = SegmentStatusManager.readTableStatusFile(CarbonTablePath
+            .getTableStatusFilePath(carbonTable.getTablePath))
+          CarbonUpdateUtil.updateTableMetadataStatus(loadMetaDataDetails.map(loadMetadataDetail =>
+            new Segment(loadMetadataDetail.getMergedLoadName,
+              loadMetadataDetail.getSegmentFile)).toSet.asJava,
+            carbonTable,
+            trxMgr.getLatestTrx.toString,
+            true,
+            tuple._2.asJava)
+        }
+      }
       Some(UpdateTableModel(true, trxMgr.getLatestTrx,
         executorErrors, tuple._2, true))
     } else {
       None
     }
-    CarbonProperties.getInstance().addProperty(CarbonLoadOptionConstants
-      .ENABLE_CARBON_LOAD_DIRECT_WRITE_TO_STORE_PATH, "false")
 
     CarbonInsertIntoWithDf(
       databaseNameOp = Some(carbonTable.getDatabaseName),
       tableName = carbonTable.getTableName,
-      options = Map(("fileheader" -> header)),
+      options = Map("fileheader" -> header, "sort_scope" -> "nosort"),
       isOverwriteTable = false,
       dataFrame = loadDF.select(tableCols.map(col): _*),
       updateModel = updateTableModel,
@@ -267,10 +283,14 @@ case class CarbonMergeDataSetCommand(
         StructField(status_on_mergeds, IntegerType)))
     val factory =
       new SparkCarbonFileFormat().prepareWrite(sparkSession, job,
-        carbonTable.getTableInfo.getFactTable.getTableProperties.asScala.toMap, schema)
+        Map(), schema)
     val config = SparkSQLUtil.broadCastHadoopConf(sparkSession.sparkContext, job.getConfiguration)
     (frame.rdd.coalesce(DistributionUtil.getConfiguredExecutors(sparkSession.sparkContext)).
       mapPartitionsWithIndex { case (index, iter) =>
+        var directlyWriteDataToHdfs = CarbonProperties.getInstance()
+          .getProperty(CarbonLoadOptionConstants
+            .ENABLE_CARBON_LOAD_DIRECT_WRITE_TO_STORE_PATH, CarbonLoadOptionConstants
+            .ENABLE_CARBON_LOAD_DIRECT_WRITE_TO_STORE_PATH_DEFAULT)
         CarbonProperties.getInstance().addProperty(CarbonLoadOptionConstants
           .ENABLE_CARBON_LOAD_DIRECT_WRITE_TO_STORE_PATH, "true")
         val confB = config.value.value
@@ -283,6 +303,9 @@ case class CarbonMergeDataSetCommand(
           val queue = new util.LinkedList[InternalRow]()
           override def hasNext: Boolean = if (!queue.isEmpty || iter.hasNext) true else {
             writer.close()
+            // revert load direct write to store path after insert
+            CarbonProperties.getInstance().addProperty(CarbonLoadOptionConstants
+              .ENABLE_CARBON_LOAD_DIRECT_WRITE_TO_STORE_PATH, directlyWriteDataToHdfs)
             false
           }
 

@@ -93,7 +93,10 @@ private abstract class MVMatchPattern extends Logging {
             case function: ScalaUDF if function.function.isInstanceOf[TimeSeriesFunction] =>
               getTransformedTimeSeriesFunction(function) -> alias.toAttribute
             case cast: Cast if cast.child.isInstanceOf[AttributeReference] =>
-              getTransformedCastExpression(cast) -> alias.toAttribute
+              getTransformedCastOrImplicitCastExpression(cast) -> alias.toAttribute
+            case implicitCastInputTypeExp: ImplicitCastInputTypes =>
+              getTransformedCastOrImplicitCastExpression(implicitCastInputTypeExp) ->
+              alias.toAttribute
             case _ =>
               alias.child -> alias.toAttribute
           }
@@ -120,7 +123,9 @@ private abstract class MVMatchPattern extends Logging {
                 case function: ScalaUDF if function.function.isInstanceOf[TimeSeriesFunction] =>
                   getTransformedTimeSeriesFunction(function)
                 case cast: Cast if cast.child.isInstanceOf[AttributeReference] =>
-                  getTransformedCastExpression(cast)
+                  getTransformedCastOrImplicitCastExpression(cast)
+                case implicitCastInputTypeExp: ImplicitCastInputTypes =>
+                  getTransformedCastOrImplicitCastExpression(implicitCastInputTypeExp)
               }
               attribute = aliasMapExp.get(newExp)
             }
@@ -247,10 +252,12 @@ private abstract class MVMatchPattern extends Logging {
   }
 
   /**
-   * transform cast expression to change it's child attribute reference name to lower case
+   * transform castOrImplicitCastExp expression to change it's child attribute reference name to
+   * lower case
    */
-  protected def getTransformedCastExpression(cast: Cast): Expression = {
-    cast.transform {
+  protected def getTransformedCastOrImplicitCastExpression(
+      castOrImplicitCastExp: Expression): Expression = {
+    castOrImplicitCastExp.transform {
       case reference: AttributeReference =>
         CarbonToSparkAdapter.createAttributeReference(
           reference.name.toLowerCase,
@@ -726,7 +733,11 @@ private object SelectSelectNoChildDelta extends MVMatchPattern with PredicateHel
 
           if (r2eJoinsMatch) {
             if (isPredicateEmR && isOutputEmR && isOutputRmE && rejoin.isEmpty && isLOEmLOR) {
-              Seq(sel_1a)
+              if (sel_1q.flagSpec.isEmpty) {
+                Seq(sel_1a)
+              } else {
+                Seq(sel_1a.copy(flags = sel_1q.flags, flagSpec = sel_1q.flagSpec))
+              }
             } else {
               // no compensation needed
               val tChildren = new collection.mutable.ArrayBuffer[ModularPlan]()

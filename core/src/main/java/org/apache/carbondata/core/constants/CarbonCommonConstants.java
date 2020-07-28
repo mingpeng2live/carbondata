@@ -1220,6 +1220,14 @@ public final class CarbonCommonConstants {
   public static final String CARBON_INPUT_SEGMENTS = "carbon.input.segments.";
 
   /**
+   * Materialized view thread context properties
+   */
+  @CarbonProperty(dynamicConfigurable = true)
+  public static final String CARBON_ENABLE_MV = "carbon.enable.mv";
+
+  public static final String CARBON_ENABLE_MV_DEFAULT = "true";
+
+  /**
    * ENABLE_QUERY_STATISTICS
    */
   @CarbonProperty
@@ -1292,6 +1300,18 @@ public final class CarbonCommonConstants {
    * default value to enable min or max during filter query execution
    */
   public static final String MIN_MAX_DEFAULT_VALUE = "true";
+
+  /**
+   * max SDK pagination lru cache size in MB upto which lru cache will be loaded in memory
+   */
+  @CarbonProperty
+  public static final String CARBON_MAX_PAGINATION_LRU_CACHE_SIZE_IN_MB =
+      "carbon.max.pagination.lru.cache.size.in.mb";
+
+  /**
+   * max SDK lru cache size default value in MB
+   */
+  public static final String CARBON_MAX_PAGINATION_LRU_CACHE_SIZE_IN_MB_DEFAULT = "-1";
 
   @CarbonProperty(dynamicConfigurable = true)
   public static final String ENABLE_VECTOR_READER = "carbon.enable.vector.reader";
@@ -1521,6 +1541,16 @@ public final class CarbonCommonConstants {
 
   public static final String CARBON_QUERY_STAGE_INPUT_DEFAULT = "false";
 
+  /**
+   * MAX_TIMEOUT_FOR_INSERTSTAGE_JOB
+   */
+  public static final String CARBON_INSERT_STAGE_TIMEOUT = "carbon.insert.stage.timeout";
+
+  /**
+   * DFAULT_MAX_TIMEOUT_FOR_INSERTSTAGE_JOB: 8 hour
+   */
+  public static final long CARBON_INSERT_STAGE_TIMEOUT_DEFAULT = 28800000;
+
   //////////////////////////////////////////////////////////////////////////////////////////
   // Index parameter start here
   //////////////////////////////////////////////////////////////////////////////////////////
@@ -1613,7 +1643,7 @@ public final class CarbonCommonConstants {
 
   public static final String HDFSURL_PREFIX = "hdfs://";
 
-  public static final String LOCAL_FILE_PREFIX = "file://";
+  public static final String LOCAL_FILE_PREFIX = "file:/";
 
   public static final String VIEWFSURL_PREFIX = "viewfs://";
 
@@ -2422,12 +2452,6 @@ public final class CarbonCommonConstants {
    * INDEX_STATUS defines the status of index. (Enabled / Disabled)
    */
   public static final String INDEX_STATUS = "index_status";
-
-  /**
-   * Materialized view thread context properties
-   */
-  @CarbonProperty
-  public static final String DISABLE_SQL_REWRITE = "disable_sql_rewrite";
 
   /**
    * property which defines the insert stage flow

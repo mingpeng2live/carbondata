@@ -71,6 +71,21 @@ class UpdateCarbonTableTestCase extends QueryTest with BeforeAndAfterAll {
     sql("""drop table iud.zerorows""")
   }
 
+  test("test update operation with multiple loads and clean files operation") {
+    sql("""drop table if exists iud.zerorows""").show
+    sql("""create table iud.zerorows (c1 string,c2 int,c3 string,c5 string) STORED AS carbondata""")
+    sql(s"""LOAD DATA LOCAL INPATH '$resourcesPath/IUD/dest.csv' INTO table iud.zerorows""")
+    sql(s"""LOAD DATA LOCAL INPATH '$resourcesPath/IUD/dest.csv' INTO table iud.zerorows""")
+    sql("""update zerorows d  set (d.c2) = (d.c2 + 1) where d.c1 = 'a'""").show()
+    sql("""update zerorows d  set (d.c2) = (d.c2 + 1) where d.c1 = 'b'""").show()
+    sql("clean files for table iud.zerorows")
+    checkAnswer(
+      sql("""select c1,c2,c3,c5 from iud.zerorows"""),
+      Seq(Row("a",2,"aa","aaa"),Row("b",3,"bb","bbb"),Row("c",3,"cc","ccc"),Row("d",4,"dd","ddd"),Row("e",5,"ee","eee"),Row("a",2,"aa","aaa"),Row("b",3,"bb","bbb"),Row("c",3,"cc","ccc"),Row("d",4,"dd","ddd"),Row("e",5,"ee","eee"))
+    )
+    sql("""drop table iud.zerorows""")
+  }
+
 
   test("update carbon table[select from source table with where and exist]") {
     sql("""drop table if exists iud.dest11""").show
@@ -889,6 +904,30 @@ class UpdateCarbonTableTestCase extends QueryTest with BeforeAndAfterAll {
 
     sql("drop table if exists test_return_row_count")
     sql("drop table if exists test_return_row_count_source")
+  }
+
+  test("test update for partition table without merge index files for segment") {
+    try {
+      sql("DROP TABLE IF EXISTS iud.partition_nomerge_index")
+      CarbonProperties.getInstance()
+        .addProperty(CarbonCommonConstants.CARBON_MERGE_INDEX_IN_SEGMENT, "false")
+      sql(
+        s"""CREATE TABLE iud.partition_nomerge_index (a INT, b INT) PARTITIONED BY (country
+           |STRING) STORED AS carbondata"""
+          .stripMargin)
+      sql("INSERT INTO iud.partition_nomerge_index  PARTITION(country='India') SELECT 1,2")
+      sql("INSERT INTO iud.partition_nomerge_index  PARTITION(country='India') SELECT 3,4")
+      sql("INSERT INTO iud.partition_nomerge_index  PARTITION(country='China') SELECT 5,6")
+      sql("INSERT INTO iud.partition_nomerge_index  PARTITION(country='China') SELECT 7,8")
+      checkAnswer(sql("select * from iud.partition_nomerge_index"),
+        Seq(Row(1, 2, "India"), Row(3, 4, "India"), Row(5, 6, "China"), Row(7, 8, "China")))
+      sql("UPDATE iud.partition_nomerge_index SET (b)=(1)")
+      checkAnswer(sql("select * from iud.partition_nomerge_index"),
+        Seq(Row(1, 1, "India"), Row(3, 1, "India"), Row(5, 1, "China"), Row(7, 1, "China")))
+    } finally {
+      CarbonProperties.getInstance()
+        .removeProperty(CarbonCommonConstants.CARBON_MERGE_INDEX_IN_SEGMENT)
+    }
   }
 
   override def afterAll {

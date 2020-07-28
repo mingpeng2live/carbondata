@@ -86,7 +86,7 @@ public final class CarbonProperties {
   /**
    * class instance.
    */
-  private static final CarbonProperties CARBONPROPERTIESINSTANCE = new CarbonProperties();
+  private static final CarbonProperties INSTANCE = new CarbonProperties();
 
   /**
    * Properties
@@ -116,7 +116,7 @@ public final class CarbonProperties {
    * @return carbon properties instance
    */
   public static CarbonProperties getInstance() {
-    return CARBONPROPERTIESINSTANCE;
+    return INSTANCE;
   }
 
   /**
@@ -250,6 +250,7 @@ public final class CarbonProperties {
     validateNumberOfColumnPerIORead();
     validateEnableUnsafeSort();
     validateEnableOffHeapSort();
+    validateEnableMV();
     validateCustomBlockDistribution();
     validateEnableVectorReader();
     validateLockType();
@@ -501,6 +502,19 @@ public final class CarbonProperties {
     }
   }
 
+  private void validateEnableMV() {
+    String isMVEnabled = carbonProperties.getProperty(CarbonCommonConstants.CARBON_ENABLE_MV);
+    if (!CarbonUtil.validateBoolean(isMVEnabled)) {
+      LOGGER.warn(String.format("The enable mv value \"%s\" is invalid. " +
+              "Using the default value \"%s\"",
+              isMVEnabled,
+          CarbonCommonConstants.CARBON_ENABLE_MV_DEFAULT
+      ));
+      carbonProperties.setProperty(CarbonCommonConstants.CARBON_ENABLE_MV,
+          CarbonCommonConstants.CARBON_ENABLE_MV_DEFAULT);
+    }
+  }
+
   private void validateEnableUnsafeSort() {
     String unSafeSortStr = carbonProperties.getProperty(ENABLE_UNSAFE_SORT);
     if (unSafeSortStr == null) {
@@ -676,23 +690,23 @@ public final class CarbonProperties {
   private void validateNumberOfColumnPerIORead() {
     String numberOfColumnPerIOString = carbonProperties
         .getProperty(NUMBER_OF_COLUMN_TO_READ_IN_IO,
-            CarbonV3DataFormatConstants.NUMBER_OF_COLUMN_TO_READ_IN_IO_DEFAULTVALUE);
+            CarbonV3DataFormatConstants.NUMBER_OF_COLUMN_TO_READ_IN_IO_DEFAULT_VALUE);
     try {
       short numberOfColumnPerIO = Short.parseShort(numberOfColumnPerIOString);
       if (numberOfColumnPerIO < CarbonV3DataFormatConstants.NUMBER_OF_COLUMN_TO_READ_IN_IO_MIN
           || numberOfColumnPerIO > CarbonV3DataFormatConstants.NUMBER_OF_COLUMN_TO_READ_IN_IO_MAX) {
         LOGGER.info("The Number Of pages per blocklet column value \"" + numberOfColumnPerIOString
             + "\" is invalid. Using the default value \""
-            + CarbonV3DataFormatConstants.NUMBER_OF_COLUMN_TO_READ_IN_IO_DEFAULTVALUE);
+            + CarbonV3DataFormatConstants.NUMBER_OF_COLUMN_TO_READ_IN_IO_DEFAULT_VALUE);
         carbonProperties.setProperty(NUMBER_OF_COLUMN_TO_READ_IN_IO,
-            CarbonV3DataFormatConstants.NUMBER_OF_COLUMN_TO_READ_IN_IO_DEFAULTVALUE);
+            CarbonV3DataFormatConstants.NUMBER_OF_COLUMN_TO_READ_IN_IO_DEFAULT_VALUE);
       }
     } catch (NumberFormatException e) {
       LOGGER.info("The Number Of pages per blocklet column value \"" + numberOfColumnPerIOString
           + "\" is invalid. Using the default value \""
-          + CarbonV3DataFormatConstants.NUMBER_OF_COLUMN_TO_READ_IN_IO_DEFAULTVALUE);
+          + CarbonV3DataFormatConstants.NUMBER_OF_COLUMN_TO_READ_IN_IO_DEFAULT_VALUE);
       carbonProperties.setProperty(NUMBER_OF_COLUMN_TO_READ_IN_IO,
-          CarbonV3DataFormatConstants.NUMBER_OF_COLUMN_TO_READ_IN_IO_DEFAULTVALUE);
+          CarbonV3DataFormatConstants.NUMBER_OF_COLUMN_TO_READ_IN_IO_DEFAULT_VALUE);
     }
   }
 
@@ -1017,7 +1031,7 @@ public final class CarbonProperties {
   }
 
   /**
-   * gettting the unmerged segment numbers to be merged.
+   * getting the unmerged segment numbers to be merged.
    *
    * @return corrected value of unmerged segments to be merged
    */
@@ -1168,7 +1182,7 @@ public final class CarbonProperties {
       try {
         batchSize = Integer.parseInt(batchSizeString);
       } catch (NumberFormatException ne) {
-        LOGGER.error("Invalid inmemory records size. Using default value");
+        LOGGER.error("Invalid in-memory records size. Using default value");
         batchSize = CarbonCommonConstants.DETAIL_QUERY_BATCH_SIZE_DEFAULT;
       }
     } else {
@@ -1236,7 +1250,7 @@ public final class CarbonProperties {
   }
 
   /**
-   * Returns configured update deleta files value for IUD compaction
+   * Returns configured update delta files value for IUD compaction
    *
    * @return numberOfDeltaFilesThreshold
    */
@@ -1266,7 +1280,7 @@ public final class CarbonProperties {
   }
 
   /**
-   * Returns configured delete deleta files value for IUD compaction
+   * Returns configured delete delta files value for IUD compaction
    *
    * @return numberOfDeltaFilesThreshold
    */
@@ -1763,6 +1777,19 @@ public final class CarbonProperties {
   }
 
   /**
+   * Check whether the MV is enabled by the user or not.
+   */
+  public boolean isMVEnabled() {
+    String mvEnabled = CarbonProperties.getInstance().getProperty(
+            CarbonCommonConstants.CARBON_ENABLE_MV);
+    if (mvEnabled == null || !CarbonUtil.validateBoolean(mvEnabled)) {
+      return Boolean.parseBoolean(CarbonCommonConstants.CARBON_ENABLE_MV_DEFAULT);
+    } else {
+      return mvEnabled.equalsIgnoreCase("true");
+    }
+  }
+
+  /**
    * Check if user has enabled/disabled the use of pre-priming for index server
    */
   public boolean isIndexServerPrePrimingEnabled() {
@@ -1862,7 +1889,7 @@ public final class CarbonProperties {
               CarbonCommonConstants.CARBON_DRIVER_PRUNING_MULTI_THREAD_ENABLE_FILES_COUNT,
               CarbonCommonConstants.CARBON_DRIVER_PRUNING_MULTI_THREAD_ENABLE_FILES_COUNT_DEFAULT));
       if (driverPruningMultiThreadEnableFilesCount <= 0) {
-        LOGGER.info("The driver prunning multithread enable files count value \""
+        LOGGER.info("The driver pruning multi-thread enable files count value \""
             + driverPruningMultiThreadEnableFilesCount
             + "\" is invalid. Using the default value \""
             + CarbonCommonConstants.CARBON_DRIVER_PRUNING_MULTI_THREAD_ENABLE_FILES_COUNT_DEFAULT);
@@ -1870,7 +1897,7 @@ public final class CarbonProperties {
             .CARBON_DRIVER_PRUNING_MULTI_THREAD_ENABLE_FILES_COUNT_DEFAULT);
       }
     } catch (NumberFormatException e) {
-      LOGGER.info("The driver prunning multithread enable files count value " +
+      LOGGER.info("The driver pruning multi-thread enable files count value " +
               "is invalid. Using the default value \""
           + CarbonCommonConstants.CARBON_DRIVER_PRUNING_MULTI_THREAD_ENABLE_FILES_COUNT_DEFAULT);
       driverPruningMultiThreadEnableFilesCount = Integer.parseInt(CarbonCommonConstants
@@ -1899,6 +1926,38 @@ public final class CarbonProperties {
         }
       } catch (Exception ex) {
         return CarbonCommonConstants.INPUT_METRICS_UPDATE_INTERVAL_DEFAULT;
+      }
+    }
+  }
+
+  /**
+   * Validate and get the input metrics interval
+   *
+   * @return input metrics interval
+   */
+  public static Long getInsertStageTimeout() {
+    String timeout = CarbonProperties.getInstance()
+            .getProperty(CarbonCommonConstants.CARBON_INSERT_STAGE_TIMEOUT);
+    if (timeout == null) {
+      return CarbonCommonConstants.CARBON_INSERT_STAGE_TIMEOUT_DEFAULT;
+    } else {
+      try {
+        long configuredValue = Long.parseLong(timeout);
+        if (configuredValue < 0) {
+          LOGGER.warn(String.format("The value \"%s\" configured for key \"%s\" " +
+                  "is invalid. Ignoring it. use default value:\"%s\"", timeout,
+                  CarbonCommonConstants.CARBON_INSERT_STAGE_TIMEOUT,
+                  CarbonCommonConstants.CARBON_INSERT_STAGE_TIMEOUT_DEFAULT));
+          return CarbonCommonConstants.CARBON_INSERT_STAGE_TIMEOUT_DEFAULT;
+        } else {
+          return configuredValue;
+        }
+      } catch (NumberFormatException e) {
+        LOGGER.warn(String.format("The value \"%s\" configured for key \"%s\" " +
+                "is invalid. Ignoring it. use default value:\"%s\"", timeout,
+                CarbonCommonConstants.CARBON_INSERT_STAGE_TIMEOUT,
+                CarbonCommonConstants.CARBON_INSERT_STAGE_TIMEOUT_DEFAULT));
+        return CarbonCommonConstants.CARBON_INSERT_STAGE_TIMEOUT_DEFAULT;
       }
     }
   }

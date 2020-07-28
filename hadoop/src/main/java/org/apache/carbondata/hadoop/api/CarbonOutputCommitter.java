@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.apache.carbondata.common.logging.LogServiceFactory;
@@ -40,6 +41,7 @@ import org.apache.carbondata.core.statusmanager.SegmentStatus;
 import org.apache.carbondata.core.statusmanager.SegmentStatusManager;
 import org.apache.carbondata.core.util.CarbonProperties;
 import org.apache.carbondata.core.util.CarbonSessionInfo;
+import org.apache.carbondata.core.util.ObjectSerializationUtil;
 import org.apache.carbondata.core.util.ThreadLocalSessionInfo;
 import org.apache.carbondata.core.util.path.CarbonTablePath;
 import org.apache.carbondata.events.OperationContext;
@@ -57,7 +59,7 @@ import org.apache.hadoop.mapreduce.lib.output.FileOutputCommitter;
 import org.apache.log4j.Logger;
 
 /**
- * Outputcommitter which manages the segments during loading.It commits segment information to the
+ * OutputCommitter which manages the segments during loading.It commits segment information to the
  * tablestatus file upon success or fail.
  */
 public class CarbonOutputCommitter extends FileOutputCommitter {
@@ -72,10 +74,7 @@ public class CarbonOutputCommitter extends FileOutputCommitter {
   }
 
   /**
-   * Update the tablestatus with inprogress while setup the job.
-   *
-   * @param context
-   * @throws IOException
+   * Update the tablestatus with in-progress while setup the job.
    */
   @Override
   public void setupJob(JobContext context) throws IOException {
@@ -102,9 +101,6 @@ public class CarbonOutputCommitter extends FileOutputCommitter {
 
   /**
    * Update the tablestatus as success after job is success
-   *
-   * @param context
-   * @throws IOException
    */
   @Override
   public void commitJob(JobContext context) throws IOException {
@@ -228,14 +224,17 @@ public class CarbonOutputCommitter extends FileOutputCommitter {
       }
     }
     String updateTime =
-        context.getConfiguration().get(CarbonTableOutputFormat.UPADTE_TIMESTAMP, null);
+        context.getConfiguration().get(CarbonTableOutputFormat.UPDATE_TIMESTAMP, null);
     String segmentsToBeDeleted =
         context.getConfiguration().get(CarbonTableOutputFormat.SEGMENTS_TO_BE_DELETED, "");
     List<Segment> segmentDeleteList = Segment.toSegmentList(segmentsToBeDeleted.split(","), null);
-    Set<Segment> segmentSet = new HashSet<>(
-        new SegmentStatusManager(carbonTable.getAbsoluteTableIdentifier(),
-            context.getConfiguration()).getValidAndInvalidSegments(carbonTable.isMV())
-            .getValidSegments());
+    Set<Segment> segmentSet = new HashSet<>();
+    if (updateTime != null || uniqueId != null) {
+      segmentSet = new HashSet<>(
+          new SegmentStatusManager(carbonTable.getAbsoluteTableIdentifier(),
+              context.getConfiguration()).getValidAndInvalidSegments(carbonTable.isMV())
+                  .getValidSegments());
+    }
     if (updateTime != null) {
       CarbonUpdateUtil.updateTableMetadataStatus(segmentSet, carbonTable, updateTime, true,
           segmentDeleteList);
@@ -251,7 +250,8 @@ public class CarbonOutputCommitter extends FileOutputCommitter {
   private void commitJobForPartition(JobContext context, boolean overwriteSet,
       CarbonLoadModel loadModel, String partitionPath) throws IOException {
     String size = context.getConfiguration().get("carbon.datasize", "");
-    if (size.equalsIgnoreCase("0")) {
+    String indexSize = context.getConfiguration().get("carbon.indexsize", "");
+    if (size.equalsIgnoreCase("0") || indexSize.equalsIgnoreCase("0")) {
       CarbonLoaderUtil.updateTableStatusForFailure(loadModel);
       return;
     }
@@ -267,6 +267,18 @@ public class CarbonOutputCommitter extends FileOutputCommitter {
       uuid = operationContext.getProperty("uuid").toString();
     }
     String tempFolderPath = loadModel.getSegmentId() + "_" + loadModel.getFactTimeStamp() + ".tmp";
+    boolean isMergeIndex = Boolean.parseBoolean(CarbonProperties.getInstance()
+        .getProperty(CarbonCommonConstants.CARBON_MERGE_INDEX_IN_SEGMENT,
+            CarbonCommonConstants.CARBON_MERGE_INDEX_IN_SEGMENT_DEFAULT));
+    if (!isMergeIndex) {
+      Map<String, Set<String>> indexFileNameMap = (Map<String, Set<String>>) ObjectSerializationUtil
+          .convertStringToObject(context.getConfiguration().get("carbon.index.files.name"));
+      List<String> partitionList =
+          (List<String>) ObjectSerializationUtil.convertStringToObject(partitionPath);
+      SegmentFileStore.writeSegmentFile(loadModel.getTablePath(), loadModel.getSegmentId(),
+          String.valueOf(loadModel.getFactTimeStamp()), partitionList, indexFileNameMap);
+      tempFolderPath = null;
+    }
     if (operationContext != null) {
       operationContext.setProperty("partitionPath", partitionPath);
       operationContext.setProperty("tempPath", tempFolderPath);
@@ -285,7 +297,11 @@ public class CarbonOutputCommitter extends FileOutputCommitter {
     String segmentFileName = SegmentFileStore.genSegmentFileName(
         loadModel.getSegmentId(), String.valueOf(loadModel.getFactTimeStamp()));
     newMetaEntry.setSegmentFile(segmentFileName + CarbonTablePath.SEGMENT_EXT);
-    newMetaEntry.setIndexSize("" + loadModel.getMetrics().getMergeIndexSize());
+    if (isMergeIndex) {
+      newMetaEntry.setIndexSize("" + loadModel.getMetrics().getMergeIndexSize());
+    } else if (!StringUtils.isEmpty(indexSize)) {
+      newMetaEntry.setIndexSize(indexSize);
+    }
     if (!StringUtils.isEmpty(size)) {
       newMetaEntry.setDataSize(size);
     }
@@ -305,10 +321,6 @@ public class CarbonOutputCommitter extends FileOutputCommitter {
   /**
    * Overwrite the partitions in case of overwrite query. It just updates the partition map files
    * of all segment files.
-   *
-   * @param loadModel
-   * @return
-   * @throws IOException
    */
   private String overwritePartitions(CarbonLoadModel loadModel, LoadMetadataDetails newMetaEntry,
       String uuid) throws IOException {
@@ -323,19 +335,18 @@ public class CarbonOutputCommitter extends FileOutputCommitter {
           new SegmentStatusManager(table.getAbsoluteTableIdentifier())
               .getValidAndInvalidSegments(table.isMV()).getValidSegments();
       String uniqueId = String.valueOf(System.currentTimeMillis());
-      List<String> tobeUpdatedSegs = new ArrayList<>();
-      List<String> tobeDeletedSegs = new ArrayList<>();
+      List<String> toBeUpdatedSegments = new ArrayList<>();
+      List<String> toBeDeletedSegments = new ArrayList<>();
       // First drop the partitions from partition mapper files of each segment
       for (Segment segment : validSegments) {
-        new SegmentFileStore(table.getTablePath(), segment.getSegmentFileName())
-            .dropPartitions(segment, partitionSpecs, uniqueId, tobeDeletedSegs, tobeUpdatedSegs);
-
+        new SegmentFileStore(table.getTablePath(), segment.getSegmentFileName()).dropPartitions(
+            segment, partitionSpecs, uniqueId, toBeDeletedSegments, toBeUpdatedSegments);
       }
       newMetaEntry.setUpdateStatusFileName(uniqueId);
       // Commit the removed partitions in carbon store.
       CarbonLoaderUtil.recordNewLoadMetadata(newMetaEntry, loadModel, false, false, uuid,
-          Segment.toSegmentList(tobeDeletedSegs, null),
-          Segment.toSegmentList(tobeUpdatedSegs, null));
+          Segment.toSegmentList(toBeDeletedSegments, null),
+          Segment.toSegmentList(toBeUpdatedSegments, null));
       return uniqueId;
     }
     return null;
@@ -353,10 +364,6 @@ public class CarbonOutputCommitter extends FileOutputCommitter {
   /**
    * Update the tablestatus as fail if any fail happens.And also clean up the temp folders if any
    * are existed.
-   *
-   * @param context
-   * @param state
-   * @throws IOException
    */
   @Override
   public void abortJob(JobContext context, JobStatus.State state) throws IOException {

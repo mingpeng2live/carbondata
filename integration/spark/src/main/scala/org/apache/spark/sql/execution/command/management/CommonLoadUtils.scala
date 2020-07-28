@@ -43,7 +43,7 @@ import org.apache.spark.storage.StorageLevel
 import org.apache.spark.unsafe.types.UTF8String
 import org.apache.spark.util.{CarbonReflectionUtils, CollectionAccumulator, SparkUtil}
 
-import org.apache.carbondata.common.Strings
+import org.apache.carbondata.common.{Maps, Strings}
 import org.apache.carbondata.common.logging.LogServiceFactory
 import org.apache.carbondata.converter.SparkDataTypeConverterImpl
 import org.apache.carbondata.core.constants.{CarbonCommonConstants, CarbonLoadOptionConstants, SortScopeOptions}
@@ -126,7 +126,6 @@ object CommonLoadUtils {
             TableIdentifier(tableName, databaseNameOp))).collect {
           case l: LogicalRelation => l
         }.head
-      sizeInBytes = logicalPartitionRelation.relation.sizeInBytes
       finalPartition = getCompletePartitionValues(partition, table)
     }
     (sizeInBytes, table, dbName, logicalPartitionRelation, finalPartition)
@@ -264,6 +263,20 @@ object CommonLoadUtils {
     }
     optionsFinal
       .put("bad_record_path", CarbonBadRecordUtil.getBadRecordsPath(options.asJava, table))
+    // If DATEFORMAT is not present in load options, check from table properties.
+    if (optionsFinal.get("dateformat").isEmpty) {
+      optionsFinal.put("dateformat", Maps.getOrDefault(tableProperties,
+        "dateformat", CarbonProperties.getInstance
+          .getProperty(CarbonCommonConstants.CARBON_DATE_FORMAT,
+            CarbonCommonConstants.CARBON_DATE_DEFAULT_FORMAT)))
+    }
+    // If TIMESTAMPFORMAT is not present in load options, check from table properties.
+    if (optionsFinal.get("timestampformat").isEmpty) {
+      optionsFinal.put("timestampformat", Maps.getOrDefault(tableProperties,
+        "timestampformat", CarbonProperties.getInstance
+          .getProperty(CarbonCommonConstants.CARBON_TIMESTAMP_FORMAT,
+            CarbonCommonConstants.CARBON_TIMESTAMP_DEFAULT_FORMAT)))
+    }
     optionsFinal
   }
 
@@ -843,8 +856,6 @@ object CommonLoadUtils {
   def loadDataWithPartition(loadParams: CarbonLoadParams): Seq[Row] = {
     val table = loadParams.carbonLoadModel.getCarbonDataLoadSchema.getCarbonTable
     val catalogTable: CatalogTable = loadParams.logicalPartitionRelation.catalogTable.get
-    // Clean up the already dropped partitioned data
-    SegmentFileStore.cleanSegments(table, null, false)
     CarbonUtils.threadSet("partition.operationcontext", loadParams.operationContext)
     val attributes = if (loadParams.scanResultRDD.isDefined) {
       // take the already re-arranged attributes
@@ -1102,7 +1113,7 @@ object CommonLoadUtils {
     val specs =
       SegmentFileStore.getPartitionSpecs(loadParams.carbonLoadModel.getSegmentId,
         loadParams.carbonLoadModel.getTablePath,
-        SegmentStatusManager.readLoadMetadata(CarbonTablePath.getMetadataPath(table.getTablePath)))
+        loadParams.carbonLoadModel.getLoadMetadataDetails.asScala.toArray)
     if (specs != null) {
       specs.asScala.map { spec =>
         Row(spec.getPartitions.asScala.mkString("/"), spec.getLocation.toString, spec.getUuid)

@@ -17,6 +17,10 @@
 
 package org.apache.carbondata.spark
 
+import scala.util.Try
+
+import org.apache.carbondata.core.constants.CarbonCommonConstants
+import org.apache.carbondata.core.util.CarbonProperties
 
 /**
  * Contains all options for Spark data source
@@ -58,7 +62,7 @@ class CarbonOption(options: Map[String, String]) {
 
   lazy val tablePageSizeInMb: Option[String] = options.get("table_page_size_inmb")
 
-  lazy val bucketNumber: Int = options.getOrElse("bucket_number", "0").toInt
+  lazy val bucketNumber: Option[Int] = Try(options.getOrElse("bucket_number", "0").toInt).toOption
 
   lazy val bucketColumns: String = options.getOrElse("bucket_columns", "")
 
@@ -75,6 +79,10 @@ class CarbonOption(options: Map[String, String]) {
 
   lazy val overwriteEnabled: Boolean =
     options.getOrElse("overwrite", "false").toBoolean
+
+  lazy val timestampformat: Option[String] = options.get("timestampformat")
+
+  lazy val dateformat: Option[String] = options.get("dateformat")
 
   def toMap: Map[String, String] = options
 }

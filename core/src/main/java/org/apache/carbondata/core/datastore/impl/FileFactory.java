@@ -175,7 +175,7 @@ public final class FileFactory {
   }
 
   /**
-   * Need carbonfile object path because depends on file format implementation
+   * Need carbon file object path because depends on file format implementation
    * path will be formatted.
    */
   public static String getFormattedPath(String path) {
@@ -224,7 +224,7 @@ public final class FileFactory {
   }
 
   /**
-   * return the datainputStream which is seek to the offset of file
+   * return the DataInputStream which is seek to the offset of file
    *
    * @param path
    * @param bufferSize
@@ -354,7 +354,7 @@ public final class FileFactory {
   }
 
   /**
-   * for getting the dataoutput stream using the hdfs filesystem append API.
+   * for getting the DataOutputStream using the hdfs filesystem append API.
    *
    * @param path
    * @return
@@ -620,8 +620,9 @@ public final class FileFactory {
     }
 
     final String lowerPath = path.toLowerCase(Locale.getDefault());
-    return lowerPath.contains("://") || lowerPath.startsWith(CarbonCommonConstants.HDFSURL_PREFIX)
-        || lowerPath.startsWith(CarbonCommonConstants.VIEWFSURL_PREFIX) || lowerPath
+    return lowerPath.contains("file:/") || lowerPath.contains("://") || lowerPath
+        .startsWith(CarbonCommonConstants.HDFSURL_PREFIX) || lowerPath
+        .startsWith(CarbonCommonConstants.VIEWFSURL_PREFIX) || lowerPath
         .startsWith(CarbonCommonConstants.LOCAL_FILE_PREFIX) || lowerPath
         .startsWith(CarbonCommonConstants.ALLUXIOURL_PREFIX) || lowerPath
         .startsWith(CarbonCommonConstants.S3N_PREFIX) || lowerPath

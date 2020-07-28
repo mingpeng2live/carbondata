@@ -19,8 +19,16 @@ package org.apache.carbondata.core.scan.expression;
 
 import java.util.List;
 
+import org.apache.carbondata.core.datastore.block.SegmentProperties;
+import org.apache.carbondata.core.scan.filter.executer.FilterExecutor;
+import org.apache.carbondata.core.scan.filter.resolver.FilterResolverIntf;
+
 public abstract class UnknownExpression extends Expression {
 
   public abstract List<ColumnExpression> getAllColumnList();
 
+  public FilterExecutor getFilterExecutor(FilterResolverIntf filterResolverIntf,
+      SegmentProperties segmentProperties) {
+    return null;
+  }
 }

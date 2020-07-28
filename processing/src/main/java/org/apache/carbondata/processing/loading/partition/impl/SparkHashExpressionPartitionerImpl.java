@@ -48,8 +48,9 @@ public class SparkHashExpressionPartitionerImpl implements Partitioner<CarbonRow
       DataType dataType = columnSchemas.get(i).getDataType();
       if (dataType == DataTypes.LONG || dataType == DataTypes.DOUBLE) {
         hashes[i] = new LongHash(indexes.get(i));
-      } else if (dataType == DataTypes.SHORT || dataType == DataTypes.INT ||
-          dataType == DataTypes.FLOAT || dataType == DataTypes.BOOLEAN) {
+      } else if (dataType == DataTypes.SHORT || dataType == DataTypes.INT
+          || dataType == DataTypes.FLOAT || dataType == DataTypes.BOOLEAN
+          || dataType == DataTypes.DATE) {
         hashes[i] = new IntegralHash(indexes.get(i));
       } else if (DataTypes.isDecimal(dataType)) {
         hashes[i] = new DecimalHash(indexes.get(i));
@@ -93,7 +94,7 @@ public class SparkHashExpressionPartitionerImpl implements Partitioner<CarbonRow
       }
       int intValue = 0;
       if (value[index] instanceof Boolean) {
-        boolean boolValue = (boolean) value[intValue];
+        boolean boolValue = (boolean) value[index];
         intValue = boolValue ? 1 : 0;
       } else if (value[index] instanceof Float) {
         intValue = Float.floatToIntBits((float) value[index]);

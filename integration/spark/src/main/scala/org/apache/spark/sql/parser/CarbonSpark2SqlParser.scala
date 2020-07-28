@@ -541,19 +541,23 @@ class CarbonSpark2SqlParser extends CarbonDDLSqlParser {
    */
   protected lazy val showSegments: Parser[LogicalPlan] =
     (SHOW ~> opt(HISTORY) <~ SEGMENTS <~ ((FOR <~ TABLE) | ON)) ~ (ident <~ ".").? ~ ident ~
-    (AS  ~> restInput).? <~ opt(";") ^^ {
-      case showHistory ~ databaseName ~ tableName ~ queryOp =>
+      opt(WITH <~ STAGE) ~ (LIMIT ~> numericLit).? ~ (AS  ~> restInput).? <~ opt(";") ^^ {
+      case showHistory ~ databaseName ~ tableName ~ withStage ~ limit ~ queryOp =>
         if (queryOp.isEmpty) {
           CarbonShowSegmentsCommand(
             CarbonParserUtil.convertDbNameToLowerCase(databaseName),
             tableName.toLowerCase(),
-            showHistory.isDefined)
+            if (limit.isDefined) Some(Integer.valueOf(limit.get)) else None,
+            showHistory.isDefined,
+            withStage.isDefined)
         } else {
           CarbonShowSegmentsAsSelectCommand(
             CarbonParserUtil.convertDbNameToLowerCase(databaseName),
             tableName.toLowerCase(),
             queryOp.get,
-            showHistory.isDefined)
+            if (limit.isDefined) Some(Integer.valueOf(limit.get)) else None,
+            showHistory.isDefined,
+            withStage.isDefined)
         }
     }
 
@@ -762,13 +766,12 @@ class CarbonSpark2SqlParser extends CarbonDDLSqlParser {
       throw new MalformedCarbonCommandException("Invalid table properties")
     }
     if (options.isBucketingEnabled) {
-      if (options.bucketNumber.toString.contains("-") ||
-          options.bucketNumber.toString.contains("+") ||  options.bucketNumber == 0) {
+      if (options.bucketNumber.isEmpty || options.bucketNumber.get <= 0) {
         throw new MalformedCarbonCommandException("INVALID NUMBER OF BUCKETS SPECIFIED")
       }
       else {
         Some(BucketFields(options.bucketColumns.toLowerCase.split(",").map(_.trim),
-          options.bucketNumber))
+          options.bucketNumber.get))
       }
     } else {
       None

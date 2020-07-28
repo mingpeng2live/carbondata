@@ -32,7 +32,7 @@ concept which helps to maintain consistency of data and easy transaction managem
 
   ```
   SHOW [HISTORY] SEGMENTS
-  [FOR TABLE | ON] [db_name.]table_name
+  [FOR TABLE | ON] [db_name.]table_name [INCLUDE STAGE] [LIMIT number_of_segments]
   [AS (select query from table_name_segments)]
   ```
 
@@ -54,9 +54,21 @@ concept which helps to maintain consistency of data and easy transaction managem
   SHOW SEGMENTS ON CarbonDatabase.CarbonTable
   ```
 
+  Show 10 visible segments with the largest segmentid
+
+  ```
+  SHOW SEGMENTS ON CarbonDatabase.CarbonTable LIMIT 10
+  ```
+
   Show all segments, include invisible segments
   ```
   SHOW HISTORY SEGMENTS ON CarbonDatabase.CarbonTable
+  ```
+
+  Show all segments, include stages
+  Stage status is 'Unload' or 'Loading', and stage ID, stage load time taken is null.
+  ```
+  SHOW SEGMENTS ON CarbonDatabase.CarbonTable INCLUDE STAGE
   ```
 
 
@@ -83,6 +95,9 @@ concept which helps to maintain consistency of data and easy transaction managem
   SHOW SEGMENTS ON CarbonTable AS 
   SELECT * FROM CarbonTable_segments
   
+  SHOW SEGMENTS ON CarbonTable LIMIT 10 AS 
+  SELECT * FROM CarbonTable_segments
+  
   SHOW SEGMENTS ON CarbonTable AS
   SELECT id, dataSize FROM CarbonTable_segments 
   WHERE status='Success' 
@@ -90,6 +105,9 @@ concept which helps to maintain consistency of data and easy transaction managem
   
   SHOW SEGMENTS ON CarbonTable AS
   SELECT avg(timeTakenMs) FROM CarbonTable_segments  
+  
+  SHOW SEGMENTS ON CarbonTable INCLUDE STAGE AS
+  SELECT avg(timeTakenMs) FROM CarbonTable_segments
   ```
 
 

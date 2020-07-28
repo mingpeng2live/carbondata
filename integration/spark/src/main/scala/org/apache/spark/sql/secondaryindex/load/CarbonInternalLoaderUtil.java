@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -117,6 +118,24 @@ public class CarbonInternalLoaderUtil {
             }
           }
           updatedLoadMetadataDetails.add(currentLoadMetadataDetails[i]);
+        }
+
+        // check if newLoadMetadataDetail has segments which are not in  currentLoadMetaDetails
+        // and add them to the updatedLoadMetadataDetails
+        boolean foundNext = false;
+        for (int i = 0; i < newLoadMetadataDetails.size(); i++) {
+          foundNext = false;
+          for (int j = 0; j < currentLoadMetadataDetails.length; j++) {
+            if (newLoadMetadataDetails.get(i).getLoadName().equals(currentLoadMetadataDetails[j].getLoadName())) {
+              foundNext = true;
+              break;
+            }
+            if (j == currentLoadMetadataDetails.length - 1 && !foundNext) {
+              // if not found in the list then add it
+              updatedLoadMetadataDetails.add(newLoadMetadataDetails.get(i));
+              found = true;
+            }
+          }
         }
 
         // when data load is done for first time, add all the details
@@ -216,22 +235,20 @@ public class CarbonInternalLoaderUtil {
    *
    */
   public static boolean updateLoadMetadataWithMergeStatus(CarbonTable indexCarbonTable,
-      String[] loadsToMerge, String mergedLoadNumber, CarbonLoadModel carbonLoadModel,
-      Map<String, String> segmentToLoadStartTimeMap, long mergeLoadStartTime,
-      SegmentStatus segmentStatus, long newLoadStartTime, List<String> rebuiltSegments)
-      throws IOException {
+      String[] loadsToMerge, String mergedLoadNumber, Map<String, String> segmentToLoadStartTimeMap,
+      long mergeLoadStartTime, SegmentStatus segmentStatus, long newLoadStartTime,
+      List<String> rebuiltSegments) throws IOException {
     boolean tableStatusUpdationStatus = false;
     List<String> loadMergeList = new ArrayList<>(Arrays.asList(loadsToMerge));
-    AbsoluteTableIdentifier absoluteTableIdentifier =
-        carbonLoadModel.getCarbonDataLoadSchema().getCarbonTable().getAbsoluteTableIdentifier();
-    SegmentStatusManager segmentStatusManager = new SegmentStatusManager(absoluteTableIdentifier);
+    SegmentStatusManager segmentStatusManager =
+        new SegmentStatusManager(indexCarbonTable.getAbsoluteTableIdentifier());
 
     ICarbonLock carbonLock = segmentStatusManager.getTableStatusLock();
 
     try {
       if (carbonLock.lockWithRetries()) {
-        LOGGER.info("Acquired lock for the table " + carbonLoadModel.getDatabaseName() + "."
-            + carbonLoadModel.getTableName() + " for table status updation ");
+        LOGGER.info("Acquired lock for the table " + indexCarbonTable.getDatabaseName() + "."
+            + indexCarbonTable.getTableName() + " for table status updation ");
         LoadMetadataDetails[] loadDetails =
             SegmentStatusManager.readLoadMetadata(indexCarbonTable.getMetadataPath());
 
@@ -248,7 +265,7 @@ public class CarbonInternalLoaderUtil {
               return false;
             }
             loadDetail.setSegmentStatus(SegmentStatus.COMPACTED);
-            loadDetail.setModificationOrdeletionTimesStamp(modificationOrDeletionTimeStamp);
+            loadDetail.setModificationOrDeletionTimestamp(modificationOrDeletionTimeStamp);
             loadDetail.setMergedLoadName(mergedLoadNumber);
           }
         }
@@ -286,17 +303,17 @@ public class CarbonInternalLoaderUtil {
         tableStatusUpdationStatus = true;
       } else {
         LOGGER.error(
-            "Could not able to obtain lock for table" + carbonLoadModel.getDatabaseName() + "."
-                + carbonLoadModel.getTableName() + "for table status updation");
+            "Could not able to obtain lock for table" + indexCarbonTable.getDatabaseName() + "."
+                + indexCarbonTable.getTableName() + "for table status updation");
       }
     } finally {
       if (carbonLock.unlock()) {
-        LOGGER.info("Table unlocked successfully after table status updation" + carbonLoadModel
-            .getDatabaseName() + "." + carbonLoadModel.getTableName());
+        LOGGER.info("Table unlocked successfully after table status updation" + indexCarbonTable
+            .getDatabaseName() + "." + indexCarbonTable.getTableName());
       } else {
         LOGGER.error(
-            "Unable to unlock Table lock for table" + carbonLoadModel.getDatabaseName() + "."
-                + carbonLoadModel.getTableName() + " during table status updation");
+            "Unable to unlock Table lock for table" + indexCarbonTable.getDatabaseName() + "."
+                + indexCarbonTable.getTableName() + " during table status updation");
       }
     }
     return tableStatusUpdationStatus;
@@ -304,25 +321,57 @@ public class CarbonInternalLoaderUtil {
 
   /**
    * Method to check if main table and SI have same number of valid segments or not
-   *
    */
-  public static boolean checkMainTableSegEqualToSISeg(String carbonTablePath,
-      String indexTablePath) {
+  public static boolean checkMainTableSegEqualToSISeg(LoadMetadataDetails[] mainTableLoadMetadataDetails,
+                                                      LoadMetadataDetails[] siTableLoadMetadataDetails) {
     List<String> mainTableSegmentsList =
-        getListOfValidSlices(SegmentStatusManager.readCarbonMetaData(carbonTablePath));
+        getListOfValidSlices(mainTableLoadMetadataDetails);
     List<String> indexList =
-        getListOfValidSlices(SegmentStatusManager.readLoadMetadata(indexTablePath));
+        getListOfValidSlices(siTableLoadMetadataDetails);
     Collections.sort(mainTableSegmentsList);
     Collections.sort(indexList);
-    if (indexList.size() != mainTableSegmentsList.size()) {
+    // In the case when number of SI segments are more than the maintable segments do nothing
+    // and proceed to process the segments. Return False in case if maintable segments are more
+    // than SI Segments
+    if (indexList.size() < mainTableSegmentsList.size()) {
       return false;
     }
+    // There can be cases when the number of segments in the main table are less than the index
+    // table. In this case mapping all the segments in main table to SI table.
+    // Return False if a segment in maintable is not in indextable
+    HashSet<String> indexTableSet = new HashSet<String>();
     for (int i = 0; i < indexList.size(); i++) {
-      if (!indexList.get(i).equalsIgnoreCase(mainTableSegmentsList.get(i))) {
+      indexTableSet.add(indexList.get(i));
+    }
+    for (int i = 0; i < mainTableSegmentsList.size(); i++) {
+      if (!indexTableSet.contains(mainTableSegmentsList.get(i))) {
         return false;
       }
     }
     return true;
   }
 
+  /**
+   * Method to check if main table has in progress load and same segment not present in SI
+   */
+  public static boolean checkInProgLoadInMainTableAndSI(CarbonTable carbonTable,
+                                                      LoadMetadataDetails[] mainTableLoadMetadataDetails,
+                                                      LoadMetadataDetails[] siTableLoadMetadataDetails) {
+    List<String> allSiSlices = new ArrayList<>(CarbonCommonConstants.DEFAULT_COLLECTION_SIZE);
+    for (LoadMetadataDetails oneLoad : siTableLoadMetadataDetails) {
+      allSiSlices.add(oneLoad.getLoadName());
+    }
+
+    if (mainTableLoadMetadataDetails.length != 0) {
+      for (LoadMetadataDetails loadDetail : mainTableLoadMetadataDetails) {
+        // if load in progress and check if same load is present in SI.
+        if (SegmentStatusManager.isLoadInProgress(carbonTable.getAbsoluteTableIdentifier(), loadDetail.getLoadName())) {
+          if (!allSiSlices.contains(loadDetail.getLoadName())) {
+            return false;
+          }
+        }
+      }
+    }
+    return true;
+  }
 }

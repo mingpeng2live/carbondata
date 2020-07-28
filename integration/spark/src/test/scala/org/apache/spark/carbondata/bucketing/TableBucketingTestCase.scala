@@ -17,6 +17,9 @@
 
 package org.apache.spark.carbondata.bucketing
 
+import java.text.SimpleDateFormat
+import java.sql.Date
+
 import org.apache.spark.sql.{CarbonEnv, Row}
 import org.apache.spark.sql.execution.WholeStageCodegenExec
 import org.apache.spark.sql.execution.exchange.Exchange
@@ -24,7 +27,6 @@ import org.apache.spark.sql.execution.joins.SortMergeJoinExec
 import org.apache.spark.sql.test.util.QueryTest
 import org.scalatest.BeforeAndAfterAll
 import org.apache.carbondata.common.exceptions.sql.MalformedCarbonCommandException
-import org.apache.carbondata.core.constants.CarbonCommonConstants
 import org.apache.carbondata.core.metadata.CarbonMetadata
 import org.apache.carbondata.core.metadata.schema.table.CarbonTable
 import org.apache.carbondata.core.constants.CarbonCommonConstants
@@ -103,6 +105,37 @@ class TableBucketingTestCase extends QueryTest with BeforeAndAfterAll {
     } else {
       assert(false, "Bucketing info does not exist")
     }
+  }
+
+  test("test load data with DATE data type as bucket column") {
+    sql("DROP TABLE IF EXISTS table_bucket")
+    sql("""
+           CREATE TABLE IF NOT EXISTS table_bucket
+           (ID Int, date DATE, starttime Timestamp, country String,
+           name String, phonetype String, serialname String, salary Int)
+           STORED AS carbondata TBLPROPERTIES ('BUCKET_NUMBER'='2', 'BUCKET_COLUMNS'='date')
+        """)
+    sql(
+      s"""
+           LOAD DATA LOCAL INPATH '$resourcesPath/timeStampFormatData1.csv' into table table_bucket
+           OPTIONS('dateformat' = 'yyyy/MM/dd','timestampformat'='yyyy-MM-dd HH:mm:ss')
+           """)
+    sql(
+      s"""
+           LOAD DATA LOCAL INPATH '$resourcesPath/timeStampFormatData2.csv' into table table_bucket
+           OPTIONS('dateformat' = 'yyyy-MM-dd','timestampformat'='yyyy/MM/dd HH:mm:ss')
+           """)
+
+    val sdf = new SimpleDateFormat("yyyy-MM-dd")
+    checkAnswer(
+      sql("SELECT date FROM table_bucket WHERE ID = 1"),
+      Seq(Row(new Date(sdf.parse("2015-07-23").getTime)))
+    )
+    checkAnswer(
+      sql("SELECT date FROM table_bucket WHERE ID = 18"),
+      Seq(Row(new Date(sdf.parse("2015-07-25").getTime)))
+    )
+    sql("DROP TABLE IF EXISTS table_bucket")
   }
 
   test("test IUD of bucket table") {
@@ -230,6 +263,28 @@ class TableBucketingTestCase extends QueryTest with BeforeAndAfterAll {
     } else {
       assert(false, "Bucketing info does not exist")
     }
+  }
+
+  test("test create table with empty bucket number must fail") {
+    val ex = intercept[MalformedCarbonCommandException] {
+      sql(
+        "CREATE TABLE t11 (ID Int, date Timestamp, country String, name String, phonetype String," +
+        "serialname String, salary Int) STORED AS carbondata TBLPROPERTIES " +
+        "('BUCKET_NUMBER'='', 'BUCKET_COLUMNS'='name')"
+      )
+    }
+    assert(ex.getMessage.contains("INVALID NUMBER OF BUCKETS SPECIFIED"))
+  }
+
+  test("test create table with bucket number having non numeric value must fail") {
+    val ex = intercept[MalformedCarbonCommandException] {
+      sql(
+        "CREATE TABLE t11 (ID Int, date Timestamp, country String, name String, phonetype String," +
+        "serialname String, salary Int) STORED AS carbondata TBLPROPERTIES " +
+        "('BUCKET_NUMBER'='one', 'BUCKET_COLUMNS'='name')"
+      )
+    }
+    assert(ex.getMessage.contains("INVALID NUMBER OF BUCKETS SPECIFIED"))
   }
 
   test("must be unable to create if number of buckets is in negative number") {
@@ -1016,6 +1071,28 @@ class TableBucketingTestCase extends QueryTest with BeforeAndAfterAll {
       => shuffleExists2 = true
     }
     assert(shuffleExists2, "shuffle should exist when some bucket columns not exist in filter")
+  }
+
+  test("test load data with boolean type as bucket column") {
+    sql("drop table if exists boolean_table")
+    sql(
+      s"""
+         | CREATE TABLE boolean_table(
+         | booleanField BOOLEAN,
+         | stringField STRING,
+         | intField INT
+         | )
+         | STORED AS carbondata
+         | TBLPROPERTIES('BUCKET_NUMBER'='1', 'BUCKET_COLUMNS'='booleanField')
+       """.stripMargin)
+
+    sql(
+      s"""
+         | LOAD DATA LOCAL INPATH '$resourcesPath/bool/supportBooleanWithFileHeader.csv'
+         | INTO TABLE boolean_table
+           """.stripMargin)
+
+    checkAnswer(sql("select count(*) from boolean_table"), Row(10))
   }
 
   override def afterAll {

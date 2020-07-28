@@ -39,6 +39,7 @@ import org.apache.spark.sql.sources.DataSourceRegister
 import org.apache.spark.sql.types._
 import org.apache.spark.TaskContext
 
+import org.apache.carbondata.common.Maps
 import org.apache.carbondata.core.constants.{CarbonCommonConstants, CarbonLoadOptionConstants}
 import org.apache.carbondata.core.datastore.compression.CompressorFactory
 import org.apache.carbondata.core.datastore.impl.FileFactory
@@ -119,6 +120,20 @@ with Serializable {
     }
     optionsFinal
       .put("bad_record_path", CarbonBadRecordUtil.getBadRecordsPath(options.asJava, table))
+    // If DATEFORMAT is not present in load options, check from table properties.
+    if (optionsFinal.get("dateformat").isEmpty) {
+      optionsFinal.put("dateformat", Maps.getOrDefault(tableProperties,
+        "dateformat", CarbonProperties.getInstance
+          .getProperty(CarbonCommonConstants.CARBON_DATE_FORMAT,
+            CarbonCommonConstants.CARBON_DATE_DEFAULT_FORMAT)))
+    }
+    // If TIMESTAMPFORMAT is not present in load options, check from table properties.
+    if (optionsFinal.get("timestampformat").isEmpty) {
+      optionsFinal.put("timestampformat", Maps.getOrDefault(tableProperties,
+        "timestampformat", CarbonProperties.getInstance
+          .getProperty(CarbonCommonConstants.CARBON_TIMESTAMP_FORMAT,
+            CarbonCommonConstants.CARBON_TIMESTAMP_DEFAULT_FORMAT)))
+    }
     val partitionStr =
       table.getTableInfo.getFactTable.getPartitionInfo.getColumnSchemaList.asScala.map(
         _.getColumnName.toLowerCase).mkString(",")
@@ -159,19 +174,22 @@ with Serializable {
     if (currEntry != null) {
       val loadEntry =
         ObjectSerializationUtil.convertStringToObject(currEntry).asInstanceOf[LoadMetadataDetails]
-      val details =
-        SegmentStatusManager.readLoadMetadata(CarbonTablePath.getMetadataPath(model.getTablePath))
       model.setSegmentId(loadEntry.getLoadName)
       model.setFactTimeStamp(loadEntry.getLoadStartTime)
-      val list = new util.ArrayList[LoadMetadataDetails](details.toList.asJava)
-      list.add(loadEntry)
-      model.setLoadMetadataDetails(list)
+      if (!isLoadDetailsContainTheCurrentEntry(
+        model.getLoadMetadataDetails.asScala.toArray, loadEntry)) {
+        val details =
+          SegmentStatusManager.readLoadMetadata(CarbonTablePath.getMetadataPath(model.getTablePath))
+        val list = new util.ArrayList[LoadMetadataDetails](details.toList.asJava)
+        list.add(loadEntry)
+        model.setLoadMetadataDetails(list)
+      }
     }
     // Set the update timestamp if user sets in case of update query. It needs to be updated
     // in load status update time
     val updateTimeStamp = options.get("updatetimestamp")
     if (updateTimeStamp.isDefined) {
-      conf.set(CarbonTableOutputFormat.UPADTE_TIMESTAMP, updateTimeStamp.get)
+      conf.set(CarbonTableOutputFormat.UPDATE_TIMESTAMP, updateTimeStamp.get)
     }
     conf.set(CarbonCommonConstants.CARBON_WRITTEN_BY_APPNAME, sparkSession.sparkContext.appName)
     CarbonTableOutputFormat.setLoadModel(conf, model)
@@ -224,6 +242,14 @@ with Serializable {
     }
   }
   override def equals(other: Any): Boolean = other.isInstanceOf[SparkCarbonTableFormat]
+
+  private def isLoadDetailsContainTheCurrentEntry(
+      loadDetails: Array[LoadMetadataDetails],
+      currentEntry: LoadMetadataDetails): Boolean = {
+    (loadDetails.length - 1 to 0).exists { index =>
+      loadDetails(index).getLoadName.equals(currentEntry.getLoadName)
+    }
+  }
 }
 
 case class CarbonSQLHadoopMapReduceCommitProtocol(jobId: String, path: String, isAppend: Boolean)
@@ -243,6 +269,8 @@ case class CarbonSQLHadoopMapReduceCommitProtocol(jobId: String, path: String, i
       taskCommits: Seq[TaskCommitMessage]): Unit = {
     if (isCarbonDataFlow(jobContext.getConfiguration)) {
       var dataSize = 0L
+      var indexLen = 0L
+      val indexFileNameMap = new util.HashMap[String, util.Set[String]]()
       val partitions =
         taskCommits
           .flatMap { taskCommit =>
@@ -252,6 +280,24 @@ case class CarbonSQLHadoopMapReduceCommitProtocol(jobId: String, path: String, i
                 val size = map.get("carbon.datasize")
                 if (size.isDefined) {
                   dataSize = dataSize + java.lang.Long.parseLong(size.get)
+                }
+                val indexSize = map.get("carbon.indexsize")
+                if (indexSize.isDefined) {
+                  indexLen = indexLen + java.lang.Long.parseLong(indexSize.get)
+                }
+                val indexFiles = map.get("carbon.index.files.name")
+                if (indexFiles.isDefined) {
+                  val indexMap = ObjectSerializationUtil
+                    .convertStringToObject(indexFiles.get)
+                    .asInstanceOf[util.HashMap[String, Set[String]]]
+                  indexMap.asScala.foreach { e =>
+                    var values: util.Set[String] = indexFileNameMap.get(e._1)
+                    if (values == null) {
+                      values = new util.HashSet[String]()
+                      indexFileNameMap.put(e._1, values)
+                    }
+                    values.addAll(e._2.asInstanceOf[util.Set[String]])
+                  }
                 }
                 if (partition.isDefined) {
                   ObjectSerializationUtil
@@ -272,13 +318,18 @@ case class CarbonSQLHadoopMapReduceCommitProtocol(jobId: String, path: String, i
         "carbon.output.partitions.name",
         ObjectSerializationUtil.convertObjectToString(partitions))
       jobContext.getConfiguration.set("carbon.datasize", dataSize.toString)
-
+      jobContext.getConfiguration.set("carbon.indexsize", indexLen.toString)
+      jobContext.getConfiguration
+        .set("carbon.index.files.name",
+          ObjectSerializationUtil.convertObjectToString(indexFileNameMap))
       val newTaskCommits = taskCommits.map { taskCommit =>
         taskCommit.obj match {
           case (map: Map[String, String], set) =>
             new TaskCommitMessage(
-              map
-                .filterNot(e => "carbon.partitions".equals(e._1) || "carbon.datasize".equals(e._1)),
+              map.filterNot(e => "carbon.partitions".equals(e._1) ||
+                                 "carbon.datasize".equals(e._1) ||
+                                 "carbon.indexsize".equals(e._1) ||
+                                 "carbon.index.files.name".equals(e._1)),
               set)
           case _ => taskCommit
         }
@@ -302,27 +353,46 @@ case class CarbonSQLHadoopMapReduceCommitProtocol(jobId: String, path: String, i
       ThreadLocalSessionInfo.unsetAll()
       val partitions: String = taskContext.getConfiguration.get("carbon.output.partitions.name", "")
       val files = taskContext.getConfiguration.get("carbon.output.files.name", "")
+      val indexFileNameMap = new util.HashMap[String, util.Set[String]]()
       var sum = 0L
       var indexSize = 0L
-      if (!StringUtils.isEmpty(files)) {
-        val filesList = ObjectSerializationUtil
-          .convertStringToObject(files)
+      if (!StringUtils.isEmpty(partitions)) {
+        val partitionList = ObjectSerializationUtil
+          .convertStringToObject(partitions)
           .asInstanceOf[util.ArrayList[String]]
           .asScala
-        for (file <- filesList) {
-          if (file.contains(".carbondata")) {
-            sum += java.lang.Long.parseLong(file.substring(file.lastIndexOf(":") + 1))
-          } else if (file.contains(".carbonindex")) {
-            indexSize += java.lang.Long.parseLong(file.substring(file.lastIndexOf(":") + 1))
+        if (!StringUtils.isEmpty(files)) {
+          val filesList = ObjectSerializationUtil
+            .convertStringToObject(files)
+            .asInstanceOf[util.ArrayList[String]]
+            .asScala
+          for (file <- filesList) {
+            if (file.contains(".carbondata")) {
+              sum += java.lang.Long.parseLong(file.substring(file.lastIndexOf(":") + 1))
+            } else if (file.contains(".carbonindex")) {
+              val fileOffset = file.lastIndexOf(":")
+              indexSize += java.lang.Long.parseLong(file.substring(fileOffset + 1))
+              val absoluteFileName = file.substring(0, fileOffset)
+              val indexFileNameOffset = absoluteFileName.lastIndexOf("/")
+              val indexFileName = absoluteFileName.substring(indexFileNameOffset + 1)
+              val matchedPartition = partitionList.find(absoluteFileName.startsWith)
+              var values: util.Set[String] = indexFileNameMap.get(matchedPartition.get)
+              if (values == null) {
+                values = new util.HashSet[String]()
+                indexFileNameMap.put(matchedPartition.get, values)
+              }
+              values.add(indexFileName)
+            }
           }
         }
-      }
-      if (!StringUtils.isEmpty(partitions)) {
+        val indexFileNames = ObjectSerializationUtil.convertObjectToString(indexFileNameMap)
         taskMsg = taskMsg.obj match {
           case (map: Map[String, String], set) =>
             new TaskCommitMessage(
-              map ++ Map("carbon.partitions" -> partitions, "carbon.datasize" -> sum.toString),
-              set)
+              map ++ Map("carbon.partitions" -> partitions,
+                "carbon.datasize" -> sum.toString,
+                "carbon.indexsize" -> indexSize.toString,
+                "carbon.index.files.name" -> indexFileNames), set)
           case _ => taskMsg
         }
       }
