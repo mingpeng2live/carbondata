@@ -35,7 +35,7 @@ import it.unimi.dsi.fastutil.shorts.ShortOpenHashSet;
  * Below class will be used to keep all the filter values based on data type
  * for measure column.
  * In this class there are multiple type of set is used to avoid conversion of
- * primitive type to primitive object to avoid gc which cause performace degrade when
+ * primitive type to primitive object to avoid gc which cause performance degrade when
  * number of records are high
  */
 public class MeasureColumnExecutorFilterInfo {
@@ -68,9 +68,9 @@ public class MeasureColumnExecutorFilterInfo {
     } else {
       throw new IllegalArgumentException("Invalid data type");
     }
-    for (int i = 0; i < filterKeys.length; i++) {
-      if (null != filterKeys[i]) {
-        filterSet.add(filterKeys[i]);
+    for (Object filterKey : filterKeys) {
+      if (null != filterKey) {
+        filterSet.add(filterKey);
       }
     }
   }

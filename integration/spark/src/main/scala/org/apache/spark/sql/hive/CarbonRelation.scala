@@ -49,14 +49,10 @@ case class CarbonRelation(
   }
 
   val dimensionsAttr: Seq[AttributeReference] = {
-    val sett = new LinkedHashSet(carbonTable
-      .getVisibleDimensions
-      .asScala
-      .filterNot(_.isSpatialColumn)
-      .asJava)
+    val sett = new LinkedHashSet(carbonTable.getVisibleDimensions.asScala.asJava)
     sett.asScala.toSeq.map(dim => {
-      val dimval = carbonTable.getDimensionByName(dim.getColName)
-      val output: DataType = dimval.getDataType.getName.toLowerCase match {
+      val dimension = carbonTable.getDimensionByName(dim.getColName)
+      val output: DataType = dimension.getDataType.getName.toLowerCase match {
         case "array" =>
           CarbonMetastoreTypes.toDataType(
             s"array<${SparkTypeConverter.getArrayChildren(carbonTable, dim.getColName)}>")
@@ -67,7 +63,7 @@ case class CarbonRelation(
           CarbonMetastoreTypes.toDataType(
             s"map<${SparkTypeConverter.getMapChildren(carbonTable, dim.getColName)}>")
         case dType =>
-          val dataType = addDecimalScaleAndPrecision(dimval, dType)
+          val dataType = addDecimalScaleAndPrecision(dimension, dType)
           CarbonMetastoreTypes.toDataType(dataType)
       }
 
@@ -121,36 +117,31 @@ case class CarbonRelation(
 
     // convert each column to Attribute
     (otherColumns ++= partitionColumns).filter(!_.isInvisible).map { column: CarbonColumn =>
-      if (column.isDimension()) {
-        val output: DataType = column.getDataType.getName.toLowerCase match {
+      val dataTypeStatement = if (column.isDimension()) {
+        column.getDataType.getName.toLowerCase match {
           case "array" =>
-            CarbonMetastoreTypes.toDataType(
-              s"array<${SparkTypeConverter.getArrayChildren(carbonTable, column.getColName)}>")
+            s"array<${ SparkTypeConverter.getArrayChildren(carbonTable, column.getColName) }>"
           case "struct" =>
-            CarbonMetastoreTypes.toDataType(
-              s"struct<${SparkTypeConverter.getStructChildren(carbonTable, column.getColName)}>")
+            s"struct<${ SparkTypeConverter.getStructChildren(carbonTable, column.getColName) }>"
           case "map" =>
-            CarbonMetastoreTypes.toDataType(
-              s"map<${SparkTypeConverter.getMapChildren(carbonTable, column.getColName)}>")
+            s"map<${ SparkTypeConverter.getMapChildren(carbonTable, column.getColName) }>"
           case dType =>
-            val dataType = SparkTypeConverter.addDecimalScaleAndPrecision(column, dType)
-            CarbonMetastoreTypes.toDataType(dataType)
+            SparkTypeConverter.addDecimalScaleAndPrecision(column, dType)
         }
-        CarbonToSparkAdapter.createAttributeReference(
-          column.getColName, output, nullable = true, getColumnMetaData(column),
-          NamedExpression.newExprId, qualifier = Option(tableName + "." + column.getColName))
       } else {
-        val output = CarbonMetastoreTypes.toDataType {
-          column.getDataType.getName.toLowerCase match {
-            case "decimal" => "decimal(" + column.getColumnSchema.getPrecision + "," + column
-              .getColumnSchema.getScale + ")"
-            case others => others
-          }
+        column.getDataType.getName.toLowerCase match {
+          case "decimal" => "decimal(" + column.getColumnSchema.getPrecision + "," + column
+            .getColumnSchema.getScale + ")"
+          case others => others
         }
-        CarbonToSparkAdapter.createAttributeReference(
-          column.getColName, output, nullable = true, getColumnMetaData(column),
-          NamedExpression.newExprId, qualifier = Option(tableName + "." + column.getColName))
       }
+      CarbonToSparkAdapter.createAttributeReference(
+        column.getColName,
+        CarbonMetastoreTypes.toDataType(dataTypeStatement),
+        nullable = true,
+        getColumnMetaData(column),
+        NamedExpression.newExprId,
+        qualifier = Option(tableName + "." + column.getColName))
     }
   }
 
@@ -171,11 +162,11 @@ case class CarbonRelation(
     }
   }
 
-  def addDecimalScaleAndPrecision(dimval: CarbonDimension, dataType: String): String = {
+  def addDecimalScaleAndPrecision(dimension: CarbonDimension, dataType: String): String = {
     var dType = dataType
-    if (DataTypes.isDecimal(dimval.getDataType)) {
+    if (DataTypes.isDecimal(dimension.getDataType)) {
       dType +=
-      "(" + dimval.getColumnSchema.getPrecision + "," + dimval.getColumnSchema.getScale + ")"
+      "(" + dimension.getColumnSchema.getPrecision + "," + dimension.getColumnSchema.getScale + ")"
     }
     dType
   }
@@ -211,9 +202,6 @@ case class CarbonRelation(
                   null != validSeg.getLoadMetadataDetails.getIndexSize) {
                 size = size + validSeg.getLoadMetadataDetails.getDataSize.toLong +
                        validSeg.getLoadMetadataDetails.getIndexSize.toLong
-              } else {
-                size = size + FileFactory.getDirectorySize(
-                  CarbonTablePath.getSegmentPath(tablePath, validSeg.getSegmentNo))
               }
             }
             // update the new table status time

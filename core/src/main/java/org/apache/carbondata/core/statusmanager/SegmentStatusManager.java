@@ -29,7 +29,9 @@ import java.io.OutputStreamWriter;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.carbondata.common.logging.LogServiceFactory;
@@ -366,9 +368,9 @@ public class SegmentStatusManager {
    */
   private static int getMaxSegmentId(LoadMetadataDetails[] loadMetadataDetails) {
     int newSegmentId = -1;
-    for (int i = 0; i < loadMetadataDetails.length; i++) {
+    for (LoadMetadataDetails loadMetadataDetail : loadMetadataDetails) {
       try {
-        int loadCount = Integer.parseInt(loadMetadataDetails[i].getLoadName());
+        int loadCount = Integer.parseInt(loadMetadataDetail.getLoadName());
         if (newSegmentId < loadCount) {
           newSegmentId = loadCount;
         }
@@ -379,7 +381,7 @@ public class SegmentStatusManager {
         // out all the compacted folders will be deleted and entry will also be removed from the
         // table status file. In that case also if a new load comes the new segment Id assigned
         // should be 13 and not 0
-        String loadName = loadMetadataDetails[i].getLoadName();
+        String loadName = loadMetadataDetail.getLoadName();
         if (loadName.contains(".")) {
           int loadCount = Integer.parseInt(loadName.split("\\.")[0]);
           if (newSegmentId < loadCount) {
@@ -1281,23 +1283,21 @@ public class SegmentStatusManager {
     return newList;
   }
 
-  /*
-   * This method reads the load metadata file and returns Carbon segments only
+  /**
+   * map loadName -> loadStartTime
    */
-  public static LoadMetadataDetails[] readCarbonMetaData(String metadataFolderPath) {
-    String metadataFileName = metadataFolderPath + CarbonCommonConstants.FILE_SEPARATOR
-        + CarbonTablePath.TABLE_STATUS_FILE;
-    try {
-      LoadMetadataDetails[] allSegments = readTableStatusFile(metadataFileName);
-      List<LoadMetadataDetails> carbonSegments = new ArrayList<>();
-      for (LoadMetadataDetails currSegment : allSegments) {
-        if (currSegment.isCarbonFormat()) {
-          carbonSegments.add(currSegment);
-        }
+  public static Map<String, String> mapSegmentToStartTime(CarbonTable carbonTable) {
+    LoadMetadataDetails[] loadMetadataDetails = SegmentStatusManager.readLoadMetadata(
+        carbonTable.getMetadataPath());
+    if (loadMetadataDetails != null && loadMetadataDetails.length > 0) {
+      Map<String, String> map = new HashMap<>(loadMetadataDetails.length);
+      for (LoadMetadataDetails loadMetadataDetail : loadMetadataDetails) {
+        map.put(loadMetadataDetail.getLoadName(),
+            String.valueOf(loadMetadataDetail.getLoadStartTime()));
       }
-      return carbonSegments.toArray(new LoadMetadataDetails[carbonSegments.size()]);
-    } catch (IOException e) {
-      return new LoadMetadataDetails[0];
+      return map;
+    } else {
+      return new HashMap<>(0);
     }
   }
 }

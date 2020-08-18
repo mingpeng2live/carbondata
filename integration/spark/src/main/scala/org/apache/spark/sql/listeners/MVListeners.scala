@@ -52,7 +52,7 @@ object MVCompactionPostEventListener extends OperationEventListener {
    */
   override def onEvent(event: Event, operationContext: OperationContext): Unit = {
     val compactionEvent = event.asInstanceOf[AlterTableCompactionPreStatusUpdateEvent]
-    val compactionType = compactionEvent.carbonMergerMapping.campactionType
+    val compactionType = compactionEvent.carbonMergerMapping.compactionType
     if (compactionType == CompactionType.CUSTOM) {
       return
     }
@@ -71,8 +71,7 @@ object MVCompactionPostEventListener extends OperationEventListener {
             viewIdentifier.getTableName,
             None,
             compactionType.toString,
-            Some(System.currentTimeMillis()),
-            "")
+            Some(System.currentTimeMillis()))
           operationContext.setProperty(
             viewIdentifier.getDatabaseName + "_" +
             viewIdentifier.getTableName + "_Segment",

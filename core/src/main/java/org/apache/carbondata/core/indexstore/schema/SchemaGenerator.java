@@ -32,13 +32,10 @@ import org.apache.carbondata.core.util.BlockletIndexUtil;
 public class SchemaGenerator {
 
   /**
-   * Method for creating blocklet Schema. Each blocklet row will share the same schema
-   *
-   * @param segmentProperties
-   * @return
+   * creating blocklet/block Schema. Each blocklet row will share the same schema
    */
-  public static CarbonRowSchema[] createBlockSchema(SegmentProperties segmentProperties,
-      List<CarbonColumn> minMaxCacheColumns) {
+  private static CarbonRowSchema[] createSchema(SegmentProperties segmentProperties,
+      List<CarbonColumn> minMaxCacheColumns, boolean isBlocklet) {
     List<CarbonRowSchema> indexSchemas = new ArrayList<>();
     // get MinMax Schema
     getMinMaxSchema(segmentProperties, indexSchemas, minMaxCacheColumns);
@@ -59,9 +56,28 @@ public class SchemaGenerator {
     // for storing min max flag for each column which reflects whether min max for a column is
     // written in the metadata or not.
     addMinMaxFlagSchema(segmentProperties, indexSchemas, minMaxCacheColumns);
+    if (isBlocklet) {
+      //for blocklet info
+      indexSchemas.add(new CarbonRowSchema.VariableCarbonRowSchema(DataTypes.BYTE_ARRAY));
+      // for number of pages.
+      indexSchemas.add(new CarbonRowSchema.FixedCarbonRowSchema(DataTypes.SHORT));
+      // for relative blocklet id i.e. blocklet id that belongs to a particular part file
+      indexSchemas.add(new CarbonRowSchema.FixedCarbonRowSchema(DataTypes.SHORT));
+    }
     CarbonRowSchema[] schema = indexSchemas.toArray(new CarbonRowSchema[indexSchemas.size()]);
     updateBytePosition(schema);
     return schema;
+  }
+
+  /**
+   * Method for creating blocklet Schema. Each blocklet row will share the same schema
+   *
+   * @param segmentProperties
+   * @return
+   */
+  public static CarbonRowSchema[] createBlockSchema(SegmentProperties segmentProperties,
+      List<CarbonColumn> minMaxCacheColumns) {
+    return createSchema(segmentProperties, minMaxCacheColumns, false);
   }
 
   /**
@@ -74,47 +90,41 @@ public class SchemaGenerator {
     int currentSize;
     int bytePosition = 0;
     // First assign byte position to all the fixed length schema
-    for (int i = 0; i < schema.length; i++) {
-      switch (schema[i].getSchemaType()) {
-        case STRUCT:
-          CarbonRowSchema[] childSchemas =
-              ((CarbonRowSchema.StructCarbonRowSchema) schema[i]).getChildSchemas();
-          for (int j = 0; j < childSchemas.length; j++) {
-            currentSize = getSchemaSize(childSchemas[j]);
-            if (currentSize != -1) {
-              childSchemas[j].setBytePosition(bytePosition);
-              bytePosition += currentSize;
-            }
-          }
-          break;
-        default:
-          currentSize = getSchemaSize(schema[i]);
+    for (CarbonRowSchema carbonRowSchema : schema) {
+      if (carbonRowSchema.getSchemaType() == CarbonRowSchema.IndexSchemaType.STRUCT) {
+        CarbonRowSchema[] childSchemas =
+            ((CarbonRowSchema.StructCarbonRowSchema) carbonRowSchema).getChildSchemas();
+        for (CarbonRowSchema childSchema : childSchemas) {
+          currentSize = getSchemaSize(childSchema);
           if (currentSize != -1) {
-            schema[i].setBytePosition(bytePosition);
+            childSchema.setBytePosition(bytePosition);
             bytePosition += currentSize;
           }
-          break;
+        }
+      } else {
+        currentSize = getSchemaSize(carbonRowSchema);
+        if (currentSize != -1) {
+          carbonRowSchema.setBytePosition(bytePosition);
+          bytePosition += currentSize;
+        }
       }
     }
     // adding byte position for storing offset in case of variable length columns
-    for (int i = 0; i < schema.length; i++) {
-      switch (schema[i].getSchemaType()) {
-        case STRUCT:
-          CarbonRowSchema[] childSchemas =
-              ((CarbonRowSchema.StructCarbonRowSchema) schema[i]).getChildSchemas();
-          for (int j = 0; j < childSchemas.length; j++) {
-            if (childSchemas[j].getBytePosition() == -1) {
-              childSchemas[j].setBytePosition(bytePosition);
-              bytePosition += CarbonCommonConstants.INT_SIZE_IN_BYTE;
-            }
-          }
-          break;
-        default:
-          if (schema[i].getBytePosition() == -1) {
-            schema[i].setBytePosition(bytePosition);
+    for (CarbonRowSchema carbonRowSchema : schema) {
+      if (carbonRowSchema.getSchemaType() == CarbonRowSchema.IndexSchemaType.STRUCT) {
+        CarbonRowSchema[] childSchemas =
+            ((CarbonRowSchema.StructCarbonRowSchema) carbonRowSchema).getChildSchemas();
+        for (CarbonRowSchema childSchema : childSchemas) {
+          if (childSchema.getBytePosition() == -1) {
+            childSchema.setBytePosition(bytePosition);
             bytePosition += CarbonCommonConstants.INT_SIZE_IN_BYTE;
           }
-          break;
+        }
+      } else {
+        if (carbonRowSchema.getBytePosition() == -1) {
+          carbonRowSchema.setBytePosition(bytePosition);
+          bytePosition += CarbonCommonConstants.INT_SIZE_IN_BYTE;
+        }
       }
     }
   }
@@ -139,35 +149,7 @@ public class SchemaGenerator {
    */
   public static CarbonRowSchema[] createBlockletSchema(SegmentProperties segmentProperties,
       List<CarbonColumn> minMaxCacheColumns) {
-    List<CarbonRowSchema> indexSchemas = new ArrayList<>();
-    // get MinMax Schema
-    getMinMaxSchema(segmentProperties, indexSchemas, minMaxCacheColumns);
-    // for number of rows.
-    indexSchemas.add(new CarbonRowSchema.FixedCarbonRowSchema(DataTypes.INT));
-    // for table block path
-    indexSchemas.add(new CarbonRowSchema.VariableCarbonRowSchema(DataTypes.BYTE_ARRAY));
-    // for version number.
-    indexSchemas.add(new CarbonRowSchema.FixedCarbonRowSchema(DataTypes.SHORT));
-    // for schema updated time.
-    indexSchemas.add(new CarbonRowSchema.FixedCarbonRowSchema(DataTypes.LONG));
-    // for block footer offset.
-    indexSchemas.add(new CarbonRowSchema.FixedCarbonRowSchema(DataTypes.LONG));
-    // for locations
-    indexSchemas.add(new CarbonRowSchema.VariableCarbonRowSchema(DataTypes.BYTE_ARRAY));
-    // for storing block length.
-    indexSchemas.add(new CarbonRowSchema.FixedCarbonRowSchema(DataTypes.LONG));
-    // for storing min max flag for each column which reflects whether min max for a column is
-    // written in the metadata or not.
-    addMinMaxFlagSchema(segmentProperties, indexSchemas, minMaxCacheColumns);
-    //for blocklet info
-    indexSchemas.add(new CarbonRowSchema.VariableCarbonRowSchema(DataTypes.BYTE_ARRAY));
-    // for number of pages.
-    indexSchemas.add(new CarbonRowSchema.FixedCarbonRowSchema(DataTypes.SHORT));
-    // for relative blocklet id i.e. blocklet id that belongs to a particular part file
-    indexSchemas.add(new CarbonRowSchema.FixedCarbonRowSchema(DataTypes.SHORT));
-    CarbonRowSchema[] schema = indexSchemas.toArray(new CarbonRowSchema[indexSchemas.size()]);
-    updateBytePosition(schema);
-    return schema;
+    return createSchema(segmentProperties, minMaxCacheColumns, true);
   }
 
   /**

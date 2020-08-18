@@ -39,12 +39,6 @@ import org.apache.carbondata.view.MVFunctions.DUMMY_FUNCTION
  */
 class MVRewriteRule(session: SparkSession) extends Rule[LogicalPlan] {
 
-  private val catalogFactory = new MVCatalogFactory[MVSchemaWrapper] {
-    override def newCatalog(): MVCatalog[MVSchemaWrapper] = {
-      new MVCatalogInSpark(session)
-    }
-  }
-
   override def apply(logicalPlan: LogicalPlan): LogicalPlan = {
     // only query need to check this rule
     logicalPlan match {
@@ -81,7 +75,7 @@ class MVRewriteRule(session: SparkSession) extends Rule[LogicalPlan] {
     }
     logicalPlan.transform {
       case Aggregate(groupBy, aggregations, child) =>
-        // check for if plan is for dataload for preaggregate table, then skip applying mv
+        // check for if plan is for data load for pre-aggregate table, then skip applying mv
         val haveDummyFunction = aggregations.exists {
           aggregation =>
             if (aggregation.isInstanceOf[UnresolvedAlias]) {
@@ -101,16 +95,7 @@ class MVRewriteRule(session: SparkSession) extends Rule[LogicalPlan] {
     if (!CarbonProperties.getInstance().isMVEnabled) {
       return logicalPlan
     }
-    // when first time MVCatalogs are initialized, it stores session info also,
-    // but when carbon session is newly created, catalog map will not be cleared,
-    // so if session info is different, remove the entry from map.
-    val viewManager = MVManagerInSpark.get(session)
-    var viewCatalog = viewManager.getCatalog(catalogFactory, false)
-      .asInstanceOf[MVCatalogInSpark]
-    if (!viewCatalog.session.equals(session)) {
-      viewCatalog = viewManager.getCatalog(catalogFactory, true)
-        .asInstanceOf[MVCatalogInSpark]
-    }
+    val viewCatalog = MVManagerInSpark.getOrReloadMVCatalog(session)
     if (viewCatalog != null && hasSuitableMV(logicalPlan, viewCatalog)) {
       val viewRewrite = new MVRewrite(viewCatalog, logicalPlan, session)
       val rewrittenPlan = viewRewrite.rewrittenPlan

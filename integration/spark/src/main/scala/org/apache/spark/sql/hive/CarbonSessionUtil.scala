@@ -26,14 +26,14 @@ import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, SubqueryAlias}
 import org.apache.spark.sql.execution.datasources.LogicalRelation
 import org.apache.spark.sql.types.{MetadataBuilder, StructField, StructType}
-import org.apache.spark.sql.util.SparkTypeConverter
+import org.apache.spark.sql.util.{SparkSQLUtil, SparkTypeConverter}
 import org.apache.spark.util.CarbonReflectionUtils
 
 import org.apache.carbondata.common.logging.LogServiceFactory
 import org.apache.carbondata.core.metadata.schema.table.column.ColumnSchema
 
 /**
- * This class refresh the relation from cache if the carbontable in
+ * This class refresh the relation from cache if the carbon table in
  * carbon catalog is not same as cached carbon relation's carbon table.
  */
 object CarbonSessionUtil {
@@ -53,7 +53,7 @@ object CarbonSessionUtil {
     var isRelationRefreshed = false
 
     /**
-     * Set the stats to none in case of carbontable
+     * Set the stats to none in case of carbon table
      */
     def setStatsNone(catalogTable: CatalogTable): Unit = {
       if (CarbonSource.isCarbonDataSource(catalogTable)) {
@@ -85,13 +85,7 @@ object CarbonSessionUtil {
             tableOp.foreach(setStatsNone)
           case _ =>
         }
-      case SubqueryAlias(_, relation) if
-      relation.getClass.getName.equals("org.apache.spark.sql.catalyst.catalog.CatalogRelation") ||
-      relation.getClass.getName
-        .equals("org.apache.spark.sql.catalyst.catalog.HiveTableRelation") ||
-      relation.getClass.getName.equals(
-        "org.apache.spark.sql.catalyst.catalog.UnresolvedCatalogRelation"
-      ) =>
+      case SubqueryAlias(_, relation) if SparkSQLUtil.isRelation(relation.getClass.getName) =>
         val catalogTable =
           CarbonReflectionUtils.getFieldOfCatalogTable(
             "tableMeta",

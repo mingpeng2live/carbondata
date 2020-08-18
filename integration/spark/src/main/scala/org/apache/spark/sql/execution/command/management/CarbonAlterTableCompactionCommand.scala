@@ -124,7 +124,7 @@ case class CarbonAlterTableCompactionCommand(
             .getTableStatusFilePath(table.getTablePath), loadMetaDataDetails)
         } else {
           throw new ConcurrentOperationException(table.getDatabaseName,
-            table.getTableName, "table status updation", "upgrade segments")
+            table.getTableName, "table status update", "upgrade segments")
         }
       } finally {
         tableStatusLock.unlock()
@@ -355,14 +355,7 @@ case class CarbonAlterTableCompactionCommand(
         if (CompactionType.IUD_UPDDEL_DELTA != compactionType) {
           updateLock.unlock()
         }
-        val viewManager = MVManagerInSpark.get(sqlContext.sparkSession)
-        val viewSchemas = new util.ArrayList[MVSchema]()
-        for (viewSchema <- viewManager.getSchemasOnTable(carbonTable).asScala) {
-          if (viewSchema.isRefreshOnManual) {
-            viewSchemas.add(viewSchema)
-          }
-        }
-        viewManager.setStatus(viewSchemas, MVStatus.DISABLED)
+        MVManagerInSpark.disableMVOnTable(sqlContext.sparkSession, carbonTable)
       }
     }
   }

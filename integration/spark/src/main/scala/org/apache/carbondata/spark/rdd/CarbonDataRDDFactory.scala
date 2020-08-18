@@ -28,11 +28,8 @@ import scala.util.Random
 import org.apache.commons.lang3.StringUtils
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
-import org.apache.hadoop.mapred.JobConf
-import org.apache.hadoop.mapreduce.Job
 import org.apache.hadoop.mapreduce.lib.input.{FileInputFormat, FileSplit}
 import org.apache.spark.{SparkEnv, TaskContext}
-import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.rdd.{DataLoadCoalescedRDD, DataLoadPartitionCoalescer, RDD}
 import org.apache.spark.sql.{CarbonEnv, DataFrame, Row, SparkSession, SQLContext}
 import org.apache.spark.sql.catalyst.{InternalRow, TableIdentifier}
@@ -72,7 +69,7 @@ import org.apache.carbondata.processing.merger.{CarbonCompactionUtil, CarbonData
 import org.apache.carbondata.processing.util.{CarbonDataProcessorUtil, CarbonLoaderUtil}
 import org.apache.carbondata.spark.{DataLoadResultImpl, _}
 import org.apache.carbondata.spark.load._
-import org.apache.carbondata.spark.util.{CarbonScalaUtil, CommonUtil, Util}
+import org.apache.carbondata.spark.util.{CarbonScalaUtil, CarbonSparkUtil, CommonUtil, Util}
 import org.apache.carbondata.view.MVManagerInSpark
 
 /**
@@ -206,7 +203,7 @@ object CarbonDataRDDFactory {
               val compactionSize = CarbonDataMergerUtil
                 .getCompactionSize(CompactionType.MAJOR, carbonLoadModel)
 
-              val newcompactionModel = CompactionModel(
+              val newCompactionModel = CompactionModel(
                 compactionSize,
                 compactionType,
                 table,
@@ -218,7 +215,7 @@ object CarbonDataRDDFactory {
               try {
                 CompactionFactory.getCompactor(
                   newCarbonLoadModel,
-                  newcompactionModel,
+                  newCompactionModel,
                   executor,
                   sqlContext,
                   storeLocation,
@@ -375,7 +372,7 @@ object CarbonDataRDDFactory {
               .getFactTable
               .getListOfColumns
               .asScala
-              .filterNot(col => col.isInvisible || col.isSpatialColumn || col.isComplexColumn)
+              .filterNot(col => col.isInvisible || col.isComplexColumn)
             val convertedRdd = CommonLoadUtils.getConvertedInternalRow(
               colSchema,
               scanResultRdd.get,
@@ -484,7 +481,7 @@ object CarbonDataRDDFactory {
         LOGGER.error(ex)
     }
     try {
-      // handle the status file updation for the update cmd.
+      // handle the status file update for the update cmd.
       if (updateModel.isDefined && !updateModel.get.loadAsNewSegment) {
         if (loadStatus == SegmentStatus.LOAD_FAILURE) {
           CarbonScalaUtil.updateErrorInUpdateModel(updateModel.get, executorMessage)
@@ -494,7 +491,7 @@ object CarbonDataRDDFactory {
                    carbonLoadModel.getBadRecordsAction.split(",")(1) == LoggerAction.FAIL.name) {
           return null
         } else {
-          // in success case handle updation of the table status file.
+          // in success case handle update of the table status file.
           // success case.
           val segmentDetails = new util.HashSet[Segment]()
           var resultSize = 0
@@ -520,7 +517,7 @@ object CarbonDataRDDFactory {
             segmentMetaDataInfoMap.asJava)
 
           // this means that the update doesnt have any records to update so no need to do table
-          // status file updation.
+          // status file update.
           if (resultSize == 0) {
             return null
           }
@@ -531,7 +528,7 @@ object CarbonDataRDDFactory {
             true,
             new util.ArrayList[Segment](0),
             new util.ArrayList[Segment](segmentFiles), "")) {
-            LOGGER.error("Data update failed due to failure in table status updation.")
+            LOGGER.error("Data update failed due to failure in table status update.")
             updateModel.get.executorErrors.errorMsg = errorMessage
             updateModel.get.executorErrors.failureCauses = FailureCauses
               .STATUS_FILE_UPDATION_FAILURE
@@ -652,8 +649,8 @@ object CarbonDataRDDFactory {
             clearIndexFiles(carbonTable, carbonLoadModel.getSegmentId)
           }
           LOGGER.info("********clean up done**********")
-          LOGGER.error("Data load failed due to failure in table status updation.")
-          throw new Exception("Data load failed due to failure in table status updation.")
+          LOGGER.error("Data load failed due to failure in table status update.")
+          throw new Exception("Data load failed due to failure in table status update.")
         }
         if (SegmentStatus.LOAD_PARTIAL_SUCCESS == loadStatus) {
           LOGGER.info("Data load is partially successful for " +
@@ -714,8 +711,8 @@ object CarbonDataRDDFactory {
   }
   /**
    * Add and update the segment files. In case of update scenario the carbonindex files are written
-   * to the same segment so we need to update old segment file. So this ethod writes the latest data
-   * to new segment file and merges this file old file to get latest updated files.
+   * to the same segment so we need to update old segment file. So this method writes the latest
+   * data to new segment file and merges this file old file to get latest updated files.
    * @param carbonTable
    * @param segmentDetails
    * @return
@@ -1046,28 +1043,16 @@ object CarbonDataRDDFactory {
       LOGGER.error(errorMessage)
       throw new Exception(errorMessage)
     } else {
-      val viewManager = MVManagerInSpark.get(session)
-      val viewSchemas = new util.ArrayList[MVSchema]()
-      for (viewSchema <- viewManager.getSchemasOnTable(carbonTable).asScala) {
-        if (viewSchema.isRefreshOnManual) {
-          viewSchemas.add(viewSchema)
-        }
-      }
-      viewManager.setStatus(viewSchemas, MVStatus.DISABLED)
-      if (overwriteTable) {
-        if (!viewSchemas.isEmpty) {
-          viewManager.onTruncate(viewSchemas)
-        }
-      }
+      MVManagerInSpark.disableMVOnTable(session, carbonTable, overwriteTable)
     }
     (done, metadataDetails)
   }
 
   /**
-   * Execute load process to load from input dataframe
+   * Execute load process to load from input DataFrame
    *
    * @param sqlContext sql context
-   * @param dataFrame optional dataframe for insert
+   * @param dataFrame optional DataFrame for insert
    * @param scanResultRDD optional internal row rdd for direct insert
    * @param carbonLoadModel load model
    * @return Return an array that contains all of the elements in NewDataFrameLoaderRDD.
@@ -1144,10 +1129,8 @@ object CarbonDataRDDFactory {
              org.apache.hadoop.io.compress.BZip2Codec""".stripMargin)
 
     CommonUtil.configSplitMaxSize(sqlContext.sparkContext, filePaths, hadoopConf)
-    val jobConf = new JobConf(hadoopConf)
-    SparkHadoopUtil.get.addCredentials(jobConf)
+    val jobContext = CarbonSparkUtil.createHadoopJob(hadoopConf)
     val inputFormat = new org.apache.hadoop.mapreduce.lib.input.TextInputFormat
-    val jobContext = new Job(jobConf)
     val rawSplits = inputFormat.getSplits(jobContext).toArray
     val blockList = rawSplits.map { inputSplit =>
       val fileSplit = inputSplit.asInstanceOf[FileSplit]
@@ -1194,8 +1177,8 @@ object CarbonDataRDDFactory {
       str = str + "#Node: " + entry._1 + ", no.of.blocks: " + tableBlock.size() +
             f", totalsize.of.blocks: ${totalSize * 0.1 * 10 / 1024 /1024}%.2fMB"
       tableBlock.asScala.foreach(tableBlockInfo =>
-        if (!tableBlockInfo.getLocations.exists(hostentry =>
-          hostentry.equalsIgnoreCase(entry._1)
+        if (!tableBlockInfo.getLocations.exists(hostEntry =>
+          hostEntry.equalsIgnoreCase(entry._1)
         )) {
           str = str + " , mismatch locations: " + tableBlockInfo.getLocations
             .foldLeft("")((a, b) => a + "," + b)

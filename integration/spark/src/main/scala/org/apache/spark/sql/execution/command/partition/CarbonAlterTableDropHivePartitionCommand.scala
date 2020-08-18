@@ -41,7 +41,7 @@ import org.apache.carbondata.spark.rdd.CarbonDropPartitionRDD
 /**
  * Drop the partitions from hive and carbon store. It drops the partitions in following steps
  * 1. Drop the partitions from carbon store, it just create one new mapper file in each segment
- * with uniqueid.
+ * with unique id.
  * 2. Drop partitions from hive.
  * 3. In any above step fails then roll back the newly created files
  * 4. After success of steps 1 and 2 , it commits the files by removing the old fails.
@@ -64,6 +64,12 @@ case class CarbonAlterTableDropHivePartitionCommand(
   var carbonPartitionsTobeDropped : util.List[PartitionSpec] = _
   var table: CarbonTable = _
   val LOGGER = LogServiceFactory.getLogService(this.getClass.getCanonicalName)
+  lazy val locksToBeAcquired = List(LockUsage.METADATA_LOCK,
+    LockUsage.COMPACTION_LOCK,
+    LockUsage.DELETE_SEGMENT_LOCK,
+    LockUsage.DROP_TABLE_LOCK,
+    LockUsage.CLEAN_FILES_LOCK,
+    LockUsage.ALTER_PARTITION_LOCK)
 
   override def processMetadata(sparkSession: SparkSession): Seq[Row] = {
     table = CarbonEnv.getCarbonTable(tableName)(sparkSession)
@@ -72,12 +78,6 @@ case class CarbonAlterTableDropHivePartitionCommand(
     if (table.isHivePartitionTable) {
       var locks = List.empty[ICarbonLock]
       try {
-        val locksToBeAcquired = List(LockUsage.METADATA_LOCK,
-          LockUsage.COMPACTION_LOCK,
-          LockUsage.DELETE_SEGMENT_LOCK,
-          LockUsage.DROP_TABLE_LOCK,
-          LockUsage.CLEAN_FILES_LOCK,
-          LockUsage.ALTER_PARTITION_LOCK)
         locks = AlterTableUtil.validateTableAndAcquireLock(
           table.getDatabaseName,
           table.getTableName,
@@ -148,12 +148,6 @@ case class CarbonAlterTableDropHivePartitionCommand(
     var locks = List.empty[ICarbonLock]
     val uniqueId = System.currentTimeMillis().toString
     try {
-      val locksToBeAcquired = List(LockUsage.METADATA_LOCK,
-        LockUsage.COMPACTION_LOCK,
-        LockUsage.DELETE_SEGMENT_LOCK,
-        LockUsage.DROP_TABLE_LOCK,
-        LockUsage.CLEAN_FILES_LOCK,
-        LockUsage.ALTER_PARTITION_LOCK)
       locks = AlterTableUtil.validateTableAndAcquireLock(
         table.getDatabaseName,
         table.getTableName,

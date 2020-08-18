@@ -78,7 +78,6 @@ class AlterTableColumnRenameEventListener extends OperationEventListener with Lo
         val carbonColumns = carbonTable
           .getCreateOrderColumn.asScala
           .filter(!_.isInvisible)
-        val carbonColumn = carbonColumns.filter(_.getColName.equalsIgnoreCase(oldColumnName))
         var indexTablesToRenameColumn: Seq[String] = Seq.empty
         val secondaryIndexMap =
           carbonTable.getIndexesMap.get(IndexType.SI.getIndexProviderName)
@@ -132,7 +131,7 @@ class AlterTableColumnRenameEventListener extends OperationEventListener with Lo
             if (indexCarbonTable != null) {
               // failure tables will be automatically taken care in
               // CarbonAlterTableColRenameDataTypeChangeCommand, just need to revert the success
-              // tables, so get the latest timestamp for evolutionhistory
+              // tables, so get the latest timestamp for evolution history
               val thriftTable: TableInfo = catalog.getThriftTableInfo(indexCarbonTable)
               val evolutionEntryList = thriftTable.fact_table.schema_evolution
                 .schema_evolution_history

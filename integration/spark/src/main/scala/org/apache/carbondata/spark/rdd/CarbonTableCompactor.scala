@@ -25,9 +25,7 @@ import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
-import org.apache.hadoop.mapred.JobConf
-import org.apache.hadoop.mapreduce.{InputSplit, Job}
-import org.apache.spark.deploy.SparkHadoopUtil
+import org.apache.hadoop.mapreduce.InputSplit
 import org.apache.spark.sql.{CarbonUtils, SparkSession, SQLContext}
 import org.apache.spark.sql.execution.command.{CarbonMergerMapping, CompactionCallableModel, CompactionModel}
 import org.apache.spark.sql.execution.command.management.CommonLoadUtils
@@ -54,6 +52,7 @@ import org.apache.carbondata.processing.loading.model.CarbonLoadModel
 import org.apache.carbondata.processing.merger.{CarbonCompactionUtil, CarbonDataMergerUtil, CompactionType}
 import org.apache.carbondata.spark.load.DataLoadProcessBuilderOnSpark
 import org.apache.carbondata.spark.MergeResultImpl
+import org.apache.carbondata.spark.util.CarbonSparkUtil
 import org.apache.carbondata.view.MVManagerInSpark
 
 /**
@@ -332,7 +331,7 @@ class CarbonTableCompactor(carbonLoadModel: CarbonLoadModel,
 
       val endTime = System.nanoTime()
       LOGGER.info(s"time taken to merge $mergedLoadName is ${ endTime - startTime }")
-      val statusFileUpdation =
+      val statusFileUpdate =
         ((compactionType == CompactionType.IUD_UPDDEL_DELTA) &&
          CarbonDataMergerUtil
            .updateLoadMetadataIUDUpdateDeltaMergeStatus(loadsToMerge,
@@ -374,10 +373,10 @@ class CarbonTableCompactor(carbonLoadModel: CarbonLoadModel,
         true
       }
       // here either of the conditions can be true, when delete segment is fired after compaction
-      // has started, statusFileUpdation will be false , but at the same time commitComplete can be
+      // has started, statusFileUpdate will be false , but at the same time commitComplete can be
       // true because compaction for all indexes will be finished at a time to the maximum level
       // possible (level 1, 2 etc). so we need to check for either condition
-      if (!statusFileUpdation || !commitComplete) {
+      if (!statusFileUpdate || !commitComplete) {
         LOGGER.error(s"Compaction request failed for table ${ carbonLoadModel.getDatabaseName }." +
                      s"${ carbonLoadModel.getTableName }")
         throw new Exception(s"Compaction failed to update metadata for table" +
@@ -387,7 +386,7 @@ class CarbonTableCompactor(carbonLoadModel: CarbonLoadModel,
         LOGGER.info(s"Compaction request completed for table " +
                     s"${ carbonLoadModel.getDatabaseName }.${ carbonLoadModel.getTableName }")
 
-        // Prepriming index for compaction
+        // Pre-priming index for compaction
         val segmentsForPriming = if (compactionType.equals(CompactionType.IUD_DELETE_DELTA) ||
             compactionType.equals(CompactionType.IUD_UPDDEL_DELTA)) {
             validSegments.asScala.map(_.getSegmentNo).toList
@@ -469,9 +468,7 @@ class CarbonTableCompactor(carbonLoadModel: CarbonLoadModel,
       carbonTable: CarbonTable,
       segments: Array[Segment]
   ): java.util.List[InputSplit] = {
-    val jobConf = new JobConf(SparkSQLUtil.sessionState(sparkSession).newHadoopConf())
-    SparkHadoopUtil.get.addCredentials(jobConf)
-    val job = Job.getInstance(jobConf)
+    val job = CarbonSparkUtil.createHadoopJob()
     val conf = job.getConfiguration
     CarbonInputFormat.setTablePath(conf, carbonTable.getTablePath)
     CarbonInputFormat.setTableInfo(conf, carbonTable.getTableInfo)

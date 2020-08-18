@@ -107,9 +107,7 @@ object AlterTableUtil {
    */
   private def updateSchemaForSortColumns(
       thriftTable: TableInfo,
-      lowerCasePropertiesMap: mutable.Map[String, String],
-      schemaConverter: SchemaConverter
-  ): SchemaEvolutionEntry = {
+      lowerCasePropertiesMap: mutable.Map[String, String]): SchemaEvolutionEntry = {
     var schemaEvolutionEntry: SchemaEvolutionEntry = null
     val sortColumnsOption = lowerCasePropertiesMap.get(CarbonCommonConstants.SORT_COLUMNS)
     if (sortColumnsOption.isDefined) {
@@ -258,7 +256,7 @@ object AlterTableUtil {
       val evolutionEntryList = tableInfo.fact_table.schema_evolution.schema_evolution_history
       val updatedTime = evolutionEntryList.get(evolutionEntryList.size() - 1).time_stamp
       if (updatedTime == timeStamp) {
-        LOGGER.error(s"Reverting changes for $database.${oldCarbonTable.getTableName}")
+        LOGGER.info(s"Reverting changes for $database.${oldCarbonTable.getTableName}")
         val absoluteTableIdentifier = AbsoluteTableIdentifier.from(
           tablePath,
           newCarbonTableIdentifier)
@@ -266,6 +264,24 @@ object AlterTableUtil {
           tableInfo, absoluteTableIdentifier)(sparkSession)
         metastore.removeTableFromMetadata(database, newTableName)
       }
+    }
+  }
+
+  private def revertSchema(dbName: String,
+      tableName: String,
+      timeStamp: Long,
+      sparkSession: SparkSession)
+    (operation: (TableInfo, util.List[SchemaEvolutionEntry]) => Unit): Unit = {
+    val metastore = CarbonEnv.getInstance(sparkSession).carbonMetaStore
+    val carbonTable = CarbonEnv.getCarbonTable(Some(dbName), tableName)(sparkSession)
+    val thriftTable: TableInfo = metastore.getThriftTableInfo(carbonTable)
+    val evolutionEntryList = thriftTable.fact_table.schema_evolution.schema_evolution_history
+    val updatedTime = evolutionEntryList.get(evolutionEntryList.size() - 1).time_stamp
+    if (updatedTime == timeStamp) {
+      LOGGER.info(s"Reverting changes for $dbName.$tableName")
+      operation(thriftTable, evolutionEntryList)
+      metastore.revertTableSchemaInAlterFailure(carbonTable.getCarbonTableIdentifier,
+        thriftTable, carbonTable.getAbsoluteTableIdentifier)(sparkSession)
     }
   }
 
@@ -279,18 +295,9 @@ object AlterTableUtil {
    */
   def revertAddColumnChanges(dbName: String, tableName: String, timeStamp: Long)
     (sparkSession: SparkSession): Unit = {
-    val metastore = CarbonEnv.getInstance(sparkSession).carbonMetaStore
-    val carbonTable = CarbonEnv.getCarbonTable(Some(dbName), tableName)(sparkSession)
-    val thriftTable: TableInfo = metastore.getThriftTableInfo(carbonTable)
-    val evolutionEntryList = thriftTable.fact_table.schema_evolution.schema_evolution_history
-    val updatedTime = evolutionEntryList.get(evolutionEntryList.size() - 1).time_stamp
-    if (updatedTime == timeStamp) {
-      LOGGER.info(s"Reverting changes for $dbName.$tableName")
+    revertSchema(dbName, tableName, timeStamp, sparkSession) { (thriftTable, evolutionEntryList) =>
       val addedSchemas = evolutionEntryList.get(evolutionEntryList.size() - 1).added
       thriftTable.fact_table.table_columns.removeAll(addedSchemas)
-      metastore
-        .revertTableSchemaInAlterFailure(carbonTable.getCarbonTableIdentifier,
-          thriftTable, carbonTable.getAbsoluteTableIdentifier)(sparkSession)
     }
   }
 
@@ -304,13 +311,7 @@ object AlterTableUtil {
    */
   def revertDropColumnChanges(dbName: String, tableName: String, timeStamp: Long)
     (sparkSession: SparkSession): Unit = {
-    val metastore = CarbonEnv.getInstance(sparkSession).carbonMetaStore
-    val carbonTable = CarbonEnv.getCarbonTable(Some(dbName), tableName)(sparkSession)
-    val thriftTable: TableInfo = metastore.getThriftTableInfo(carbonTable)
-    val evolutionEntryList = thriftTable.fact_table.schema_evolution.schema_evolution_history
-    val updatedTime = evolutionEntryList.get(evolutionEntryList.size() - 1).time_stamp
-    if (updatedTime == timeStamp) {
-      LOGGER.error(s"Reverting changes for $dbName.$tableName")
+    revertSchema(dbName, tableName, timeStamp, sparkSession) { (thriftTable, evolutionEntryList) =>
       val removedSchemas = evolutionEntryList.get(evolutionEntryList.size() - 1).removed
       thriftTable.fact_table.table_columns.asScala.foreach { columnSchema =>
         removedSchemas.asScala.foreach { removedSchemas =>
@@ -319,9 +320,6 @@ object AlterTableUtil {
           }
         }
       }
-      metastore
-        .revertTableSchemaInAlterFailure(carbonTable.getCarbonTableIdentifier,
-          thriftTable, carbonTable.getAbsoluteTableIdentifier)(sparkSession)
     }
   }
 
@@ -335,13 +333,7 @@ object AlterTableUtil {
    */
   def revertColumnRenameAndDataTypeChanges(dbName: String, tableName: String, timeStamp: Long)
     (sparkSession: SparkSession): Unit = {
-    val metaStore = CarbonEnv.getInstance(sparkSession).carbonMetaStore
-    val carbonTable = CarbonEnv.getCarbonTable(Some(dbName), tableName)(sparkSession)
-    val thriftTable: TableInfo = metaStore.getThriftTableInfo(carbonTable)
-    val evolutionEntryList = thriftTable.fact_table.schema_evolution.schema_evolution_history
-    val updatedTime = evolutionEntryList.get(evolutionEntryList.size() - 1).time_stamp
-    if (updatedTime == timeStamp) {
-      LOGGER.error(s"Reverting changes for $dbName.$tableName")
+    revertSchema(dbName, tableName, timeStamp, sparkSession) { (thriftTable, evolutionEntryList) =>
       val removedColumns = evolutionEntryList.get(evolutionEntryList.size() - 1).removed
       thriftTable.fact_table.table_columns.asScala.foreach { columnSchema =>
         removedColumns.asScala.foreach { removedColumn =>
@@ -353,16 +345,13 @@ object AlterTableUtil {
           }
         }
       }
-      metaStore
-        .revertTableSchemaInAlterFailure(carbonTable.getCarbonTableIdentifier,
-          thriftTable, carbonTable.getAbsoluteTableIdentifier)(sparkSession)
     }
   }
 
   /**
    * This method modifies the table properties if column rename happened
    * @param tableProperties tableProperties of the table
-   * @param oldColumnName old COlumnname before rename
+   * @param oldColumnName old Column name before rename
    * @param newColumnName new column name to rename
    */
   def modifyTablePropertiesAfterColumnRename(
@@ -396,6 +385,18 @@ object AlterTableUtil {
     schemaEvolutionEntry
   }
 
+  def readLatestTableSchema(carbonTable: CarbonTable)(sparkSession: SparkSession): TableInfo = {
+    // get the latest carbon table
+    val metastore = CarbonEnv.getInstance(sparkSession).carbonMetaStore
+    val thriftTableInfo: TableInfo = metastore.getThriftTableInfo(carbonTable)
+    val schemaConverter = new ThriftWrapperSchemaConverterImpl()
+    // read the latest schema file
+    val wrapperTableInfo = schemaConverter.fromExternalToWrapperTableInfo(thriftTableInfo,
+      carbonTable.getDatabaseName, carbonTable.getTableName, carbonTable.getTablePath)
+    schemaConverter.fromWrapperToExternalTableInfo(
+      wrapperTableInfo, carbonTable.getDatabaseName, carbonTable.getTableName)
+  }
+
   /**
    * This method add/modify the table comments.
    *
@@ -415,28 +416,20 @@ object AlterTableUtil {
     try {
       locks = AlterTableUtil
         .validateTableAndAcquireLock(dbName, tableName, locksToBeAcquired)(sparkSession)
-      val metastore = CarbonEnv.getInstance(sparkSession).carbonMetaStore
       val carbonTable = CarbonEnv.getCarbonTable(Some(dbName), tableName)(sparkSession)
       val lowerCasePropertiesMap: mutable.Map[String, String] = mutable.Map.empty
       // convert all the keys to lower case
       properties.foreach { entry =>
         lowerCasePropertiesMap.put(entry._1.toLowerCase, entry._2)
       }
+      val thriftTable = readLatestTableSchema(carbonTable)(sparkSession)
+      val tblPropertiesMap = thriftTable.fact_table.getTableProperties.asScala
+
+      // validate for spatial index column
+      CommonUtil.validateForSpatialTypeColumn(tblPropertiesMap ++ lowerCasePropertiesMap)
+
       // validate the required cache level properties
       validateColumnMetaCacheAndCacheLevel(carbonTable, lowerCasePropertiesMap)
-      // get the latest carbon table
-      // read the latest schema file
-      val thriftTableInfo: TableInfo = metastore.getThriftTableInfo(carbonTable)
-      val schemaConverter = new ThriftWrapperSchemaConverterImpl()
-      val wrapperTableInfo = schemaConverter.fromExternalToWrapperTableInfo(
-        thriftTableInfo,
-        dbName,
-        tableName,
-        carbonTable.getTablePath)
-      val thriftTable = schemaConverter.fromWrapperToExternalTableInfo(
-        wrapperTableInfo, dbName, tableName)
-      val tblPropertiesMap: mutable.Map[String, String] =
-        thriftTable.fact_table.getTableProperties.asScala
 
       // validate the local dictionary properties
       validateLocalDictionaryProperties(lowerCasePropertiesMap, tblPropertiesMap, carbonTable)
@@ -467,8 +460,7 @@ object AlterTableUtil {
       // if SORT_COLUMN is changed, it will move them to the head of column list
       // Make an schemaEvolution entry as we changed the schema with different column order with
       // alter set sort columns
-      val schemaEvolutionEntry = updateSchemaForSortColumns(thriftTable,
-        lowerCasePropertiesMap, schemaConverter)
+      val schemaEvolutionEntry = updateSchemaForSortColumns(thriftTable, lowerCasePropertiesMap)
       // validate long string columns
       val longStringColumns = lowerCasePropertiesMap.get("long_string_columns");
       if (longStringColumns.isDefined) {
@@ -494,7 +486,7 @@ object AlterTableUtil {
           }
         }
         // check if duplicate columns are present in both local dictionary include and exclude
-        CarbonScalaUtil.validateDuplicateLocalDictIncludeExcludeColmns(tblPropertiesMap)
+        CarbonScalaUtil.validateDuplicateColumnsForLocalDict(tblPropertiesMap)
       } else {
         // This removes the comment parameter from thriftTable
         // since thriftTable also holds comment as its property.
@@ -528,13 +520,13 @@ object AlterTableUtil {
           }
         }
         // check if duplicate columns are present in both local dictionary include and exclude
-        CarbonScalaUtil.validateDuplicateLocalDictIncludeExcludeColmns(tblPropertiesMap)
+        CarbonScalaUtil.validateDuplicateColumnsForLocalDict(tblPropertiesMap)
       }
-      val (tableIdentifier, schemParts) = updateSchemaInfo(
+      val (tableIdentifier, schemaParts) = updateSchemaInfo(
         carbonTable = carbonTable,
         schemaEvolutionEntry,
         thriftTable = thriftTable)(sparkSession)
-      CarbonSessionCatalogUtil.alterTable(tableIdentifier, schemParts, None, sparkSession)
+      CarbonSessionCatalogUtil.alterTable(tableIdentifier, schemaParts, None, sparkSession)
       CarbonSessionCatalogUtil.alterTableProperties(
         sparkSession, tableIdentifier, lowerCasePropertiesMap.toMap, propKeys)
       sparkSession.catalog.refreshTable(tableIdentifier.quotedString)
@@ -577,7 +569,7 @@ object AlterTableUtil {
   }
 
   /**
-   * this method validates the local dictioanry properties for alter set
+   * this method validates the local dictionary properties for alter set
    *
    * @param lowerCasePropertiesMap
    * @param tblPropertiesMap
@@ -625,7 +617,7 @@ object AlterTableUtil {
     if (propertiesMap.get(CarbonCommonConstants.COLUMN_META_CACHE).isDefined) {
       val schemaList: util.List[ColumnSchema] = CarbonUtil
         .getColumnSchemaList(carbonTable.getVisibleDimensions.asScala
-          .filterNot(_.getColumnSchema.isSpatialColumn).asJava, carbonTable.getVisibleMeasures)
+          .asJava, carbonTable.getVisibleMeasures)
       val tableColumns: Seq[String] = schemaList.asScala
         .map(columnSchema => columnSchema.getColumnName)
       CommonUtil
@@ -734,7 +726,7 @@ object AlterTableUtil {
     val newCompactionLevelThreshold =
       propertiesMap.get(CarbonCommonConstants.TABLE_COMPACTION_LEVEL_THRESHOLD)
     if (newCompactionLevelThreshold.isDefined) {
-      // check compactionlevelthreshold is in the specified range and in the format of number
+      // check compaction level threshold is in the specified range and in the format of number
       if (CarbonProperties.getInstance().getIntArray(newCompactionLevelThreshold.get).length == 0) {
         throw new InvalidConfigurationException(
           s"Cannot set COMPACTION_LEVEL_THRESHOLD as ${newCompactionLevelThreshold.get}")
@@ -1009,10 +1001,10 @@ object AlterTableUtil {
     // varchar dataType column
     if (property._1.equalsIgnoreCase(CarbonCommonConstants.LOCAL_DICTIONARY_INCLUDE)) {
       // Validate whether any of the child columns of complex dataType column is a string column
-      localDictColumns.foreach { dictColm =>
+      localDictColumns.foreach { dictColumn =>
         for (elem <- allColumns.indices) {
           var column = allColumns(elem)
-          if (column.getColumnName.equalsIgnoreCase(dictColm) && column.getNumberOfChild > 0 &&
+          if (column.getColumnName.equalsIgnoreCase(dictColumn) && column.getNumberOfChild > 0 &&
               !validateChildColumns(allColumns, column.getNumberOfChild, elem. +(1))) {
             val errMsg =
               "None of the child columns specified in the complex dataType column(s) in " +
@@ -1060,21 +1052,9 @@ object AlterTableUtil {
     }
   }
 
-  def validateSpatialIndexColumn(carbonTable: CarbonTable, alterColumns: Seq[String]): Unit = {
-    // Do not allow columns to be added with spatial index column name
-    val properties = carbonTable.getTableInfo.getFactTable.getTableProperties.asScala
-    val indexProperty = properties.get(CarbonCommonConstants.SPATIAL_INDEX)
-    if (indexProperty.isDefined) {
-      indexProperty.get.split(",").map(_.trim).foreach(element =>
-        if (alterColumns.contains(element)) {
-          throw new MalformedCarbonCommandException(s"Column: $element is not allowed. " +
-            s"This column is present in ${CarbonCommonConstants.SPATIAL_INDEX} table property.")
-        })
-      }
-  }
-
-  def validateSpatialIndexSources(carbonTable: CarbonTable, alterColumns: Seq[String]): Unit = {
-    // Do not allow spatial index source columns to be altered
+  def validateColumnsWithSpatialIndexProperties(carbonTable: CarbonTable, alterColumns: Seq[String])
+  : Unit = {
+    // Do not allow spatial index column and its source columns to be altered
     val properties = carbonTable.getTableInfo.getFactTable.getTableProperties.asScala
     val indexProperty = properties.get(CarbonCommonConstants.SPATIAL_INDEX)
     if (indexProperty.isDefined) {
@@ -1082,9 +1062,9 @@ object AlterTableUtil {
         val srcColumns
         = properties.get(CarbonCommonConstants.SPATIAL_INDEX + s".$element.sourcecolumns")
         val common = alterColumns.intersect(srcColumns.get.split(",").map(_.trim))
-        if (common.nonEmpty) {
+        if (common.nonEmpty || alterColumns.contains(element)) {
           throw new MalformedCarbonCommandException(s"Columns present in " +
-            s"${CarbonCommonConstants.SPATIAL_INDEX} table property cannot be altered.")
+            s"${CarbonCommonConstants.SPATIAL_INDEX} table property cannot be altered/updated")
         }
       }
     }

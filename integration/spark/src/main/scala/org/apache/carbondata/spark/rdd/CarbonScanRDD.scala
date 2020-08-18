@@ -17,7 +17,6 @@
 
 package org.apache.carbondata.spark.rdd
 
-import java.text.SimpleDateFormat
 import java.util.{ArrayList, Date, List}
 
 import scala.collection.JavaConverters._
@@ -28,11 +27,9 @@ import scala.util.Random
 import scala.util.control.Breaks.{break, breakable}
 
 import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.mapred.JobConf
 import org.apache.hadoop.mapreduce._
 import org.apache.hadoop.mapreduce.task.TaskAttemptContextImpl
 import org.apache.spark._
-import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.carbondata.execution.datasources.tasklisteners.CarbonLoadTaskCompletionListener
 import org.apache.spark.sql.execution.SQLExecution
@@ -67,7 +64,7 @@ import org.apache.carbondata.hadoop.stream.CarbonStreamInputFormat
 import org.apache.carbondata.hadoop.util.CarbonInputFormatUtil
 import org.apache.carbondata.processing.util.CarbonLoaderUtil
 import org.apache.carbondata.spark.InitInputMetrics
-import org.apache.carbondata.spark.util.Util
+import org.apache.carbondata.spark.util.{CarbonSparkUtil, Util}
 
 /**
  * This RDD is used to perform query on CarbonData file. Before sending tasks to scan
@@ -89,10 +86,7 @@ class CarbonScanRDD[T: ClassTag](
   extends CarbonRDDWithTableInfo[T](spark, Nil, serializedTableInfo) {
 
   private val queryId = sparkContext.getConf.get("queryId", System.nanoTime() + "")
-  private val jobTrackerId: String = {
-    val formatter = new SimpleDateFormat("yyyyMMddHHmm")
-    formatter.format(new Date())
-  }
+  private val jobTrackerId = CarbonInputFormatUtil.createJobTrackerID()
   private var vectorReader = false
 
   private var directFill = false
@@ -116,10 +110,7 @@ class CarbonScanRDD[T: ClassTag](
     var numBlocks = 0
 
     try {
-      val conf = FileFactory.getConfiguration
-      val jobConf = new JobConf(conf)
-      SparkHadoopUtil.get.addCredentials(jobConf)
-      val job = Job.getInstance(jobConf)
+      val job = CarbonSparkUtil.createHadoopJob()
       val fileLevelExternal = tableInfo.getFactTable().getTableProperties().get("_filelevelformat")
       val format = if (fileLevelExternal != null && fileLevelExternal.equalsIgnoreCase("true")) {
         prepareFileInputFormatForDriver(job.getConfiguration)
@@ -169,7 +160,7 @@ class CarbonScanRDD[T: ClassTag](
       val batchPartitions = distributeColumnarSplits(columnarSplits)
       distributeEndTime = System.currentTimeMillis()
       // check and remove InExpression from filterExpression
-      checkAndRemoveInExpressinFromFilterExpression(batchPartitions)
+      checkAndRemoveInExpressionFromFilter(batchPartitions)
       if (streamSplits.isEmpty) {
         partitions = batchPartitions.toArray
       } else {
@@ -195,7 +186,7 @@ class CarbonScanRDD[T: ClassTag](
              | Identified no.of.streaming splits/tasks: ${ streamPartitions.size },
              | no.of.streaming files: ${format.getHitStreamFiles},
              | no.of.total streaming files: ${format.getNumStreamFiles},
-             | no.of.total streaming segement: ${format.getNumStreamSegments}
+             | no.of.total streaming segment: ${format.getNumStreamSegments}
           """.stripMargin)
 
       }
@@ -576,7 +567,7 @@ class CarbonScanRDD[T: ClassTag](
     model.setFreeUnsafeMemory(!isAdded)
     // add task completion before calling initialize as initialize method will internally
     // call for usage of unsafe method for processing of one blocklet and if there is any
-    // exceptionwhile doing that the unsafe memory occupied for that task will not
+    // exception while doing that the unsafe memory occupied for that task will not
     // get cleared
     context.addTaskCompletionListener {
       new QueryTaskCompletionListener(!isAdded,
@@ -685,7 +676,7 @@ class CarbonScanRDD[T: ClassTag](
    *
    * @param identifiedPartitions
    */
-  private def checkAndRemoveInExpressinFromFilterExpression(
+  private def checkAndRemoveInExpressionFromFilter(
       identifiedPartitions: mutable.Buffer[Partition]) = {
     if (null != indexFilter) {
       if (identifiedPartitions.nonEmpty &&

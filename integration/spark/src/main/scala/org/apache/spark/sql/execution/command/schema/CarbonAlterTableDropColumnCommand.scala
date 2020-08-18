@@ -63,7 +63,8 @@ private[sql] case class CarbonAlterTableDropColumnCommand(
           "alter table drop column is not supported for index indexSchema")
       }
       // Do not allow spatial index source columns to be dropped.
-      AlterTableUtil.validateSpatialIndexSources(carbonTable, alterTableDropColumnModel.columns)
+      AlterTableUtil.validateColumnsWithSpatialIndexProperties(carbonTable,
+        alterTableDropColumnModel.columns)
       val partitionInfo = carbonTable.getPartitionInfo()
       val tableColumns = carbonTable.getCreateOrderColumn().asScala
       if (partitionInfo != null) {
@@ -104,7 +105,7 @@ private[sql] case class CarbonAlterTableDropColumnCommand(
 
       var dictionaryColumns = Seq[org.apache.carbondata.core.metadata.schema.table.column
       .ColumnSchema]()
-      // TODO: if deleted column list includes bucketted column throw an error
+      // TODO: if deleted column list includes bucketed column throw an error
       alterTableDropColumnModel.columns.foreach { column =>
         var columnExist = false
         tableColumns.foreach { tableColumn =>

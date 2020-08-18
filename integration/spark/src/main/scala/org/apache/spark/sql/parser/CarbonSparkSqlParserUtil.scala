@@ -49,7 +49,7 @@ import org.apache.carbondata.core.util.{CarbonProperties, CarbonUtil}
 import org.apache.carbondata.core.util.path.CarbonTablePath
 import org.apache.carbondata.spark.CarbonOption
 import org.apache.carbondata.spark.exception.ProcessMetaDataException
-import org.apache.carbondata.spark.util.{CarbonScalaUtil, CommonUtil}
+import org.apache.carbondata.spark.util.CarbonScalaUtil
 
 /**
  * Utility class to validate the create table and CTAS command,
@@ -109,15 +109,20 @@ object CarbonSparkSqlParserUtil {
         tableInfo.getFactTable.getTableName, "Table should have at least one column.")
     }
 
-    // Add validatation for column compressor when create table
+    // Add validation for column compressor when create table
     val columnCompressor = tableInfo.getFactTable.getTableProperties.get(
       CarbonCommonConstants.COMPRESSOR)
+    validateColumnCompressorProperty(columnCompressor)
+  }
+
+  def validateColumnCompressorProperty(columnCompressor: String): Unit = {
+    // Add validation for column compressor when creating index table
     try {
       if (null != columnCompressor) {
         CompressorFactory.getInstance().getCompressor(columnCompressor)
       }
     } catch {
-      case ex : UnsupportedOperationException =>
+      case ex: UnsupportedOperationException =>
         throw new InvalidConfigurationException(ex.getMessage)
     }
   }
@@ -131,7 +136,7 @@ object CarbonSparkSqlParserUtil {
    *                         TablePropertyListContext,
    *                         LocationSpecContext, Option[String], TerminalNode, QueryContext,
    *                         String)
-   * @param extraTableTuple  A tupple of (Seq[StructField], Boolean, TableIdentifier, Boolean,
+   * @param extraTableTuple  A tuple of (Seq[StructField], Boolean, TableIdentifier, Boolean,
    *                         Seq[String],
    *                         Option[String], mutable.Map[String, String], Map[String, String],
    *                         Seq[StructField],
@@ -259,15 +264,14 @@ object CarbonSparkSqlParserUtil {
         .get(CarbonCommonConstants.LOCAL_DICTIONARY_ENABLE)
       if (CarbonScalaUtil.validateLocalDictionaryEnable(isLocalDic_enabled) &&
           isLocalDic_enabled.toBoolean) {
-        val allcolumns = table.getFactTable.getListOfColumns
-        for (i <- 0 until allcolumns.size()) {
-          val cols = allcolumns.get(i)
+        val allColumns = table.getFactTable.getListOfColumns
+        for (i <- 0 until allColumns.size()) {
+          val cols = allColumns.get(i)
           if (cols.getDataType == DataTypes.STRING || cols.getDataType == DataTypes.VARCHAR) {
             cols.setLocalDictColumn(true)
           }
-          allcolumns.set(i, cols)
         }
-        table.getFactTable.setListOfColumns(allcolumns)
+        table.getFactTable.setListOfColumns(allColumns)
       }
       table
     } else {
@@ -451,14 +455,14 @@ object CarbonSparkSqlParserUtil {
         .get(CarbonCommonConstants.LOCAL_DICTIONARY_ENABLE)
       if (CarbonScalaUtil.validateLocalDictionaryEnable(isLocalDic_enabled) &&
           isLocalDic_enabled.toBoolean) {
-        val allcolumns = tableInfo.getFactTable.getListOfColumns
-        for (i <- 0 until allcolumns.size()) {
-          val cols = allcolumns.get(i)
+        val allColumns = tableInfo.getFactTable.getListOfColumns
+        for (i <- 0 until allColumns.size()) {
+          val cols = allColumns.get(i)
           if (cols.getDataType == DataTypes.STRING || cols.getDataType == DataTypes.VARCHAR) {
             cols.setLocalDictColumn(true)
           }
         }
-        tableInfo.getFactTable.setListOfColumns(allcolumns)
+        tableInfo.getFactTable.setListOfColumns(allColumns)
       }
       tableInfo
     } else {
@@ -657,11 +661,7 @@ object CarbonSparkSqlParserUtil {
       dataType: String,
       values: Option[List[(Int, Int)]]
   ): CarbonAlterTableColRenameDataTypeChangeCommand = {
-    var isColumnRename = false
-    // If both the column name are not same, then its a call for column rename
-    if (!columnName.equalsIgnoreCase(columnNameCopy)) {
-      isColumnRename = true
-    }
+    val isColumnRename = !columnName.equalsIgnoreCase(columnNameCopy)
     val alterTableColRenameAndDataTypeChangeModel =
       AlterTableDataTypeChangeModel(
         CarbonParserUtil.parseDataType(dataType.toLowerCase,
@@ -738,7 +738,7 @@ object CarbonSparkSqlParserUtil {
       tableProps.toMap,
       tableModel.dimCols,
       tableModel.msrCols,
-      tableModel.highcardinalitydims.getOrElse(Seq.empty))
+      tableModel.highCardinalityDims.getOrElse(Seq.empty))
     CarbonAlterTableAddColumnCommand(alterTableAddColumnsModel)
   }
 
@@ -762,7 +762,6 @@ object CarbonSparkSqlParserUtil {
       dimFilesPath = Seq(),
       options = optionsMap,
       isOverwriteTable = isOverwrite.isDefined,
-      inputSqlString = null,
       partition = partitionSpec)
   }
 }

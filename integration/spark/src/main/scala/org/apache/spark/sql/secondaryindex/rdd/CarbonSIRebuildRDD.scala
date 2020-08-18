@@ -56,7 +56,7 @@ import org.apache.carbondata.processing.merger._
 import org.apache.carbondata.processing.util.CarbonDataProcessorUtil
 import org.apache.carbondata.spark.MergeResult
 import org.apache.carbondata.spark.rdd.{CarbonRDD, CarbonSparkPartition}
-import org.apache.carbondata.spark.util.{CarbonScalaUtil, CommonUtil}
+import org.apache.carbondata.spark.util.{CarbonScalaUtil, CarbonSparkUtil, CommonUtil}
 
 
 /**
@@ -82,9 +82,7 @@ class CarbonSIRebuildRDD[K, V](
     val absoluteTableIdentifier: AbsoluteTableIdentifier = AbsoluteTableIdentifier.from(
       indexTablePath, new CarbonTableIdentifier(databaseName, indexTableName, indexTableId)
     )
-    val jobConf: JobConf = new JobConf(FileFactory.getConfiguration)
-    SparkHadoopUtil.get.addCredentials(jobConf)
-    val job: Job = new Job(jobConf)
+    val job: Job = CarbonSparkUtil.createHadoopJob()
     val format = CarbonInputFormatUtil.createCarbonInputFormat(absoluteTableIdentifier, job)
     val defaultParallelism = sparkContext.defaultParallelism
     val noOfBlocks = 0
@@ -202,7 +200,7 @@ class CarbonSIRebuildRDD[K, V](
         try {
           // As the tableBlockInfoList is sorted take the ColCardinality from the last
           // Block of the sorted list as it will have the last updated cardinality.
-          // Blocks are sorted by order of updation using TableBlockInfo.compare method so
+          // Blocks are sorted by order of the update using TableBlockInfo.compare method so
           // the last block after the sort will be the latest one.
           dataFileFooter = CarbonUtil
             .readMetadataFile(tableBlockInfoList.get(tableBlockInfoList.size() - 1))
@@ -286,7 +284,7 @@ class CarbonSIRebuildRDD[K, V](
             segmentProperties,
             tempStoreLoc,
             carbonLoadModelCopy,
-            carbonMergerMapping.campactionType,
+            carbonMergerMapping.compactionType,
             null)
 
         } else {
@@ -296,7 +294,7 @@ class CarbonSIRebuildRDD[K, V](
             carbonLoadModelCopy,
             indexTable,
             segmentProperties,
-            carbonMergerMapping.campactionType,
+            carbonMergerMapping.compactionType,
             indexTableName,
             null)
 

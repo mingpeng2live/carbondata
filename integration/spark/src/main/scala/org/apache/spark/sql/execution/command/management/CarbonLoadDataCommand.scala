@@ -52,7 +52,6 @@ case class CarbonLoadDataCommand(databaseNameOp: Option[String],
     dimFilesPath: Seq[DataLoadTableFileMapping],
     options: Map[String, String],
     isOverwriteTable: Boolean,
-    var inputSqlString: String = null,
     partition: Map[String, Option[String]] = Map.empty,
     var operationContext: OperationContext = new OperationContext)
   extends AtomicRunnableCommand {
@@ -95,7 +94,7 @@ case class CarbonLoadDataCommand(databaseNameOp: Option[String],
     val dbName = CarbonEnv.getDatabaseName(databaseNameOp)(sparkSession)
     CarbonProperties.getInstance().addProperty("zookeeper.enable.lock", "false")
     val factPath = FileUtils.getPaths(factPathFromUser, hadoopConf)
-    currPartitions = CommonLoadUtils.getCurrentParitions(sparkSession, table)
+    currPartitions = CommonLoadUtils.getCurrentPartitions(sparkSession, table)
     CommonLoadUtils.setNumberOfCoresWhileLoading(sparkSession)
     val optionsFinal: util.Map[String, String] =
       CommonLoadUtils.getFinalLoadOptions(table, options)

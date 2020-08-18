@@ -53,10 +53,11 @@ import org.apache.carbondata.core.statusmanager.SegmentStatusManager
 import org.apache.carbondata.core.util.CarbonProperties
 import org.apache.carbondata.core.util.path.CarbonTablePath
 import org.apache.carbondata.processing.loading.FailureCauses
+import org.apache.carbondata.spark.util.CarbonSparkUtil
 
 /**
  * This command will merge the data of source dataset to target dataset backed by carbon table.
- * @param targetDsOri Target dataset to merge the data. This dataset should be backed by carbontable
+ * @param targetDsOri Target dataset to merge the data. It should be backed by carbon table
  * @param srcDS  Source dataset, it can be any data.
  * @param mergeMatches It contains the join condition and list match conditions to apply.
  */
@@ -105,7 +106,7 @@ case class CarbonMergeDataSetCommand(
     // decide join type based on match conditions
     val joinType = decideJoinType
 
-    // Add the tupleid udf to get the tupleid to generate delete delta.
+    // Add the getTupleId() udf to get the tuple id to generate delete delta.
     val frame =
       targetDs
         .withColumn(CarbonCommonConstants.CARBON_IMPLICIT_COLUMN_TUPLEID, expr("getTupleId()"))
@@ -146,9 +147,9 @@ case class CarbonMergeDataSetCommand(
 
     val st = System.currentTimeMillis()
     // Create accumulators to log the stats
-    val stats = Stats(createLongAccumalator("insertedRows"),
-      createLongAccumalator("updatedRows"),
-      createLongAccumalator("deletedRows"))
+    val stats = Stats(createLongAccumulator("insertedRows"),
+      createLongAccumulator("updatedRows"),
+      createLongAccumulator("deletedRows"))
     val targetSchema = StructType(tableCols.map { f =>
       rltn.head.carbonRelation.schema.find(_.name.equalsIgnoreCase(f)).get
     } ++ Seq(StructField(status_on_mergeds, IntegerType)))
@@ -214,7 +215,7 @@ case class CarbonMergeDataSetCommand(
     LOGGER.info(
       " Time taken to merge data  :: " + (System.currentTimeMillis() - st))
 
-    // Load the history table if the inserthistorytable action is added by user.
+    // Load the history table if the insert history table action is added by user.
     HistoryTableLoadHelper.loadHistoryTable(sparkSession, rltn.head, carbonTable,
       trxMgr, mutationAction, mergeMatches)
     // Do IUD Compaction.
@@ -262,7 +263,6 @@ case class CarbonMergeDataSetCommand(
       projections: Seq[Seq[MergeProjection]],
       targetSchema: StructType,
       stats: Stats) = {
-    val conf = SparkSQLUtil.sessionState(sparkSession).newHadoopConf()
     val frameCols = frame.queryExecution.analyzed.output
     val status = frameCols.length - 1
     val tupleId = frameCols.zipWithIndex
@@ -270,7 +270,7 @@ case class CarbonMergeDataSetCommand(
     val insertedRows = stats.insertedRows
     val updatedRows = stats.updatedRows
     val deletedRows = stats.deletedRows
-    val job = Job.getInstance(conf)
+    val job = CarbonSparkUtil.createHadoopJob()
     job.setOutputKeyClass(classOf[Void])
     job.setOutputValueClass(classOf[InternalRow])
     val uuid = UUID.randomUUID.toString
@@ -362,7 +362,7 @@ case class CarbonMergeDataSetCommand(
     }, path)
   }
 
-  private def createLongAccumalator(name: String) = {
+  private def createLongAccumulator(name: String) = {
     val acc = new LongAccumulator
     acc.setValue(0)
     acc.metadata = AccumulatorMetadata(AccumulatorContext.newId(), Some(name), false)
@@ -539,13 +539,6 @@ case class CarbonMergeDataSetCommand(
           null
         }
     }.filter(_ != null)
-  }
-
-  private def collectCarbonRelation(plan: LogicalPlan): Seq[CarbonDatasourceHadoopRelation] = {
-    plan collect {
-      case l: LogicalRelation if l.relation.isInstanceOf[CarbonDatasourceHadoopRelation] =>
-        l.relation.asInstanceOf[CarbonDatasourceHadoopRelation]
-    }
   }
 
   private def getInsertHistoryStatus(mergeMatches: MergeDataSetMatches) = {

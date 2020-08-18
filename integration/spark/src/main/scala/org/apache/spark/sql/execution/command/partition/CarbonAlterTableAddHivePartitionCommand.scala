@@ -115,11 +115,11 @@ case class CarbonAlterTableAddHivePartitionCommand(
         partitionSpecsAndLocsTobeAdded)
       if (segmentFile != null) {
         val indexToSchemas = SegmentFileStore.getSchemaFiles(segmentFile, table.getTablePath)
-        val tableColums = table.getTableInfo.getFactTable.getListOfColumns.asScala
+        val tableColumns = table.getTableInfo.getFactTable.getListOfColumns.asScala
         val isSameSchema = indexToSchemas.asScala.exists{ case(key, columnSchemas) =>
           columnSchemas.asScala.exists { col =>
-            tableColums.exists(p => p.getColumnUniqueId.equals(col.getColumnUniqueId))
-          } && columnSchemas.size() == tableColums.length
+            tableColumns.exists(p => p.getColumnUniqueId.equals(col.getColumnUniqueId))
+          } && columnSchemas.size() == tableColumns.length
         }
         if (!isSameSchema) {
           throw new UnsupportedOperationException(
@@ -173,7 +173,6 @@ case class CarbonAlterTableAddHivePartitionCommand(
           segmentUpdateStatusManager = None,
           compactionType = "", // to trigger index merge, this is not required
           factTimeStamp = Some(System.currentTimeMillis()),
-          alterSql = null,
           customSegmentIds = customSegmentIds)
         val mergeIndexEvent = AlterTableMergeIndexEvent(sparkSession, table, alterTableModel)
         OperationListenerBus.getInstance.fireEvent(mergeIndexEvent, new OperationContext)

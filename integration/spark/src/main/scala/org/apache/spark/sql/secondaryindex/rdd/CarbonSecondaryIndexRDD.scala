@@ -50,6 +50,7 @@ import org.apache.carbondata.hadoop.util.{CarbonInputFormatUtil, CarbonInputSpli
 import org.apache.carbondata.processing.loading.model.CarbonLoadModel
 import org.apache.carbondata.processing.util.{CarbonDataProcessorUtil, CarbonLoaderUtil}
 import org.apache.carbondata.spark.rdd.{CarbonRDD, CarbonSparkPartition}
+import org.apache.carbondata.spark.util.CarbonSparkUtil
 
 
 class CarbonSecondaryIndexRDD[K, V](
@@ -85,9 +86,6 @@ class CarbonSecondaryIndexRDD[K, V](
   val factToIndexColumnMapping: Array[Int] = SecondaryIndexUtil
     .prepareColumnMappingOfFactToIndexTable(carbonLoadModel.getCarbonDataLoadSchema.getCarbonTable,
       indexTable, isDictColsAlone = false)
-  val factToIndexDictColumnMapping: Array[Int] = SecondaryIndexUtil
-    .prepareColumnMappingOfFactToIndexTable(carbonLoadModel.getCarbonDataLoadSchema.getCarbonTable,
-      indexTable, isDictColsAlone = true)
 
   override def internalCompute(theSplit: Partition, context: TaskContext): Iterator[(K, V)] = {
     val LOGGER = LogServiceFactory.getLogService(this.getClass.getName)
@@ -147,8 +145,7 @@ class CarbonSecondaryIndexRDD[K, V](
               columnCardinality,
               segmentId,
               indexCarbonTable,
-              factToIndexColumnMapping,
-              factToIndexDictColumnMapping)
+              factToIndexColumnMapping)
         context.addTaskCompletionListener { context =>
           if (null != secondaryIndexQueryResultProcessor) {
             secondaryIndexQueryResultProcessor.close()
@@ -191,10 +188,7 @@ class CarbonSecondaryIndexRDD[K, V](
     val startTime = System.currentTimeMillis()
     val absoluteTableIdentifier: AbsoluteTableIdentifier = AbsoluteTableIdentifier.from(
       carbonStoreLocation, databaseName, factTableName, tableId)
-    val jobConf: JobConf = new JobConf(hadoopConf)
-    SparkHadoopUtil.get.addCredentials(jobConf)
-    val job: Job = new Job(jobConf)
-
+    val job = CarbonSparkUtil.createHadoopJob(hadoopConf)
     if (carbonLoadModel.getCarbonDataLoadSchema.getCarbonTable.isHivePartitionTable) {
       // set the configuration for current segment file("current.segment") as
       // same as carbon output committer

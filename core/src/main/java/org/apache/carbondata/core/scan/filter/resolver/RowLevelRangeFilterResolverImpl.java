@@ -18,7 +18,6 @@
 package org.apache.carbondata.core.scan.filter.resolver;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
@@ -147,14 +146,8 @@ public class RowLevelRangeFilterResolverImpl extends ConditionalFilterResolverIm
         FilterUtil.logError(e, invalidRowsPresent);
       }
     }
-    Comparator<byte[]> filterNoDictValueComparator = new Comparator<byte[]>() {
-      @Override
-      public int compare(byte[] filterMember1, byte[] filterMember2) {
-        return ByteUtil.UnsafeComparer.INSTANCE.compareTo(filterMember1, filterMember2);
-      }
-
-    };
-    Collections.sort(filterValuesList, filterNoDictValueComparator);
+    Comparator<byte[]> filterNoDictValueComparator = ByteUtil.UnsafeComparer.INSTANCE::compareTo;
+    filterValuesList.sort(filterNoDictValueComparator);
     return filterValuesList;
   }
 
@@ -181,7 +174,7 @@ public class RowLevelRangeFilterResolverImpl extends ConditionalFilterResolverIm
         FilterUtil.logError(e, invalidRowsPresent);
       }
     }
-    Collections.sort(filterValuesList, org.apache.carbondata.core.util.comparator.Comparator
+    filterValuesList.sort(org.apache.carbondata.core.util.comparator.Comparator
         .getComparatorByDataTypeForMeasure(carbonMeasure.getDataType()));
     return filterValuesList;
   }
@@ -317,8 +310,8 @@ public class RowLevelRangeFilterResolverImpl extends ConditionalFilterResolverIm
 
   /**
    * This method will provide the executor type to the callee inorder to identify
-   * the executer type for the filter resolution, Row level filter executer is a
-   * special executer since it get all the rows of the specified filter dimension
+   * the executor type for the filter resolution, Row level filter executer is a
+   * special executor since it get all the rows of the specified filter dimension
    * and will be send to the spark for processing
    */
   public FilterExecutorType getFilterExecutorType() {

@@ -17,9 +17,8 @@
 
 package org.apache.carbondata.spark.rdd
 
-import java.text.SimpleDateFormat
 import java.util
-import java.util.{Date, UUID}
+import java.util.UUID
 
 import org.apache.hadoop.mapreduce.{Job, RecordReader, TaskAttemptID, TaskType}
 import org.apache.hadoop.mapreduce.task.TaskAttemptContextImpl
@@ -42,12 +41,13 @@ import org.apache.carbondata.events.{OperationContext, OperationListenerBus}
 import org.apache.carbondata.hadoop.{CarbonInputSplit, CarbonProjection}
 import org.apache.carbondata.hadoop.api.{CarbonInputFormat, CarbonTableInputFormat}
 import org.apache.carbondata.hadoop.stream.CarbonStreamInputFormat
+import org.apache.carbondata.hadoop.util.CarbonInputFormatUtil
 import org.apache.carbondata.processing.loading.events.LoadEvents.{LoadTablePostStatusUpdateEvent, LoadTablePreStatusUpdateEvent}
 import org.apache.carbondata.processing.loading.model.CarbonLoadModel
 import org.apache.carbondata.processing.merger.{CompactionResultSortProcessor, CompactionType}
 import org.apache.carbondata.processing.util.CarbonLoaderUtil
 import org.apache.carbondata.spark.{HandoffResult, HandoffResultImpl}
-import org.apache.carbondata.spark.util.CommonUtil
+import org.apache.carbondata.spark.util.{CarbonSparkUtil, CommonUtil}
 
 
 /**
@@ -101,10 +101,7 @@ class StreamHandoffRDD[K, V](
     carbonLoadModel: CarbonLoadModel,
     handOffSegmentId: String) extends CarbonRDD[(K, V)](ss, Nil) {
 
-  private val jobTrackerId: String = {
-    val formatter = new SimpleDateFormat("yyyyMMddHHmm")
-    formatter.format(new Date())
-  }
+  private val jobTrackerId = CarbonInputFormatUtil.createJobTrackerID()
 
   override def internalCompute(
       split: Partition,
@@ -192,7 +189,7 @@ class StreamHandoffRDD[K, V](
    * get the partitions of the handoff segment
    */
   override protected def internalGetPartitions: Array[Partition] = {
-    val job = Job.getInstance(FileFactory.getConfiguration)
+    val job = CarbonSparkUtil.createHadoopJob()
     val inputFormat = new CarbonTableInputFormat[Array[Object]]()
     val segmentList = new util.ArrayList[Segment](1)
     segmentList.add(Segment.toSegment(handOffSegmentId, null))
@@ -298,7 +295,7 @@ object StreamHandoffRDD {
       carbonLoadModel: CarbonLoadModel,
       sparkSession: SparkSession,
       operationContext: OperationContext,
-      handoffSegmenId: String): Unit = {
+      handoffSegmentId: String): Unit = {
     var loadStatus = SegmentStatus.SUCCESS
     var errorMessage: String = "Handoff failure"
     try {
@@ -317,7 +314,7 @@ object StreamHandoffRDD {
         sparkSession,
         new HandoffResultImpl(),
         carbonLoadModel,
-        handoffSegmenId).collect()
+        handoffSegmentId).collect()
 
       status.foreach { x =>
         if (!x._2) {
@@ -327,7 +324,7 @@ object StreamHandoffRDD {
     } catch {
       case ex: Exception =>
         loadStatus = SegmentStatus.LOAD_FAILURE
-        LOGGER.error(s"Handoff failed on streaming segment $handoffSegmenId", ex)
+        LOGGER.error(s"Handoff failed on streaming segment $handoffSegmentId", ex)
         errorMessage = errorMessage + ": " + ex.getCause.getMessage
         LOGGER.error(errorMessage)
     }
@@ -349,14 +346,14 @@ object StreamHandoffRDD {
           carbonLoadModel)
       OperationListenerBus.getInstance().fireEvent(loadTablePreStatusUpdateEvent, operationContext)
 
-      val done = updateLoadMetadata(handoffSegmenId, carbonLoadModel)
+      val done = updateLoadMetadata(handoffSegmentId, carbonLoadModel)
 
       val loadTablePostStatusUpdateEvent: LoadTablePostStatusUpdateEvent =
         new LoadTablePostStatusUpdateEvent(carbonLoadModel)
       OperationListenerBus.getInstance()
         .fireEvent(loadTablePostStatusUpdateEvent, operationContext)
       if (!done) {
-        LOGGER.error("Handoff failed due to failure in table status updation.")
+        LOGGER.error("Handoff failed due to failure in table status update.")
         throw new Exception(errorMessage)
       }
     }
@@ -384,7 +381,7 @@ object StreamHandoffRDD {
       if (carbonLock.lockWithRetries()) {
         LOGGER.info(
           "Acquired lock for table" + loadModel.getDatabaseName() + "." + loadModel.getTableName()
-          + " for table status updation")
+          + " for table status update")
         val listOfLoadFolderDetailsArray =
           SegmentStatusManager.readLoadMetadata(metaDataFilepath)
 
@@ -414,16 +411,16 @@ object StreamHandoffRDD {
         SegmentStatusManager.writeLoadDetailsIntoFile(tableStatusPath, listOfLoadFolderDetailsArray)
         status = true
       } else {
-        LOGGER.error("Not able to acquire the lock for Table status updation for table " + loadModel
+        LOGGER.error("Not able to acquire the lock for Table status update for table " + loadModel
           .getDatabaseName() + "." + loadModel.getTableName())
       }
     } finally {
       if (carbonLock.unlock()) {
-        LOGGER.info("Table unlocked successfully after table status updation" +
+        LOGGER.info("Table unlocked successfully after table status update" +
                     loadModel.getDatabaseName() + "." + loadModel.getTableName())
       } else {
         LOGGER.error("Unable to unlock Table lock for table" + loadModel.getDatabaseName() +
-                     "." + loadModel.getTableName() + " during table status updation")
+                     "." + loadModel.getTableName() + " during table status update")
       }
     }
     status

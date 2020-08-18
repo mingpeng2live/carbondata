@@ -95,14 +95,13 @@ public final class FileFactory {
   public static FileReader getFileHolder(FileFactory.FileType fileType,
       Configuration configuration) {
     switch (fileType) {
-      case LOCAL:
-        return new FileReaderImpl();
       case HDFS:
       case ALLUXIO:
       case VIEWFS:
       case S3:
       case HDFS_LOCAL:
         return new DFSFileReaderImpl(configuration);
+      case LOCAL:
       default:
         return new FileReaderImpl();
     }
@@ -132,23 +131,7 @@ public final class FileFactory {
   }
 
   private static FileType getFileTypeWithLowerCase(String path) {
-    String lowerCase = path.toLowerCase();
-    if (lowerCase.startsWith(CarbonCommonConstants.HDFSURL_PREFIX)) {
-      return FileType.HDFS;
-    } else if (lowerCase.startsWith(CarbonCommonConstants.ALLUXIOURL_PREFIX)) {
-      return FileType.ALLUXIO;
-    } else if (lowerCase.startsWith(CarbonCommonConstants.VIEWFSURL_PREFIX)) {
-      return FileType.VIEWFS;
-    } else if (lowerCase.startsWith(CarbonCommonConstants.S3N_PREFIX) || lowerCase
-        .startsWith(CarbonCommonConstants.S3A_PREFIX) || lowerCase
-        .startsWith(CarbonCommonConstants.S3_PREFIX)) {
-      return FileType.S3;
-    } else if (lowerCase.startsWith(CarbonCommonConstants.LOCAL_FILE_PREFIX) && !configuration
-        .get(CarbonCommonConstants.FS_DEFAULT_FS)
-        .equalsIgnoreCase(CarbonCommonConstants.LOCAL_FS_URI)) {
-      return FileType.HDFS_LOCAL;
-    }
-    return null;
+    return getFileTypeWithActualPath(path.toLowerCase());
   }
 
   private static FileType getFileTypeWithActualPath(String path) {
@@ -417,7 +400,6 @@ public final class FileFactory {
             fileChannel.close();
           }
         }
-        return;
     }
   }
 

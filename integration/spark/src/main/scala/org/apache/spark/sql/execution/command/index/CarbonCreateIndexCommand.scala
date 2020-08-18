@@ -149,7 +149,7 @@ case class CarbonCreateIndexCommand(
                   column.getColName
                 }")
             }
-            // For bloomfilter, the index column datatype cannot be complex type
+            // For bloom filter, the index column datatype cannot be complex type
             if (column.isComplex) {
               throw new MalformedIndexCommandException(
                 s"BloomFilter does not support complex datatype column: ${
@@ -179,20 +179,9 @@ case class CarbonCreateIndexCommand(
           new IndexTableInfo(dbName, indexName,
             indexProperties),
           false)
-
         // set index information in parent table
-        val parentIndexMetadata = if (
-          parentTable.getTableInfo.getFactTable.getTableProperties
-            .get(parentTable.getCarbonTableIdentifier.getTableId) != null) {
-          parentTable.getIndexMetadata
-        } else {
-          new IndexMetadata(false)
-        }
-        parentIndexMetadata.addIndexTableInfo(indexProviderName,
-          indexName,
+        IndexTableUtil.addIndexInfoToParentTable(parentTable, indexProviderName, indexName,
           indexProperties)
-        parentTable.getTableInfo.getFactTable.getTableProperties
-          .put(parentTable.getCarbonTableIdentifier.getTableId, parentIndexMetadata.serialize)
 
         sparkSession.sql(
           s"""ALTER TABLE $dbName.$parentTableName SET SERDEPROPERTIES ('indexInfo' =
@@ -238,8 +227,18 @@ case class CarbonCreateIndexCommand(
               false)
             val enabledIndexInfo = IndexTableInfo.enableIndex(indexInfo, indexModel.indexName)
 
-            // set index information in parent table
-            val parentIndexMetadata = parentTable.getIndexMetadata
+            // set index information in parent table. Create it if it is null.
+            val parentIndexMetadata = if (
+              parentTable.getTableInfo.getFactTable.getTableProperties
+                .get(parentTable.getCarbonTableIdentifier.getTableId) != null) {
+              parentTable.getIndexMetadata
+            } else {
+              val tempIndexMetaData = new IndexMetadata(false)
+              tempIndexMetaData.addIndexTableInfo(indexProviderName,
+                indexModel.indexName,
+                indexSchema.getProperties)
+              tempIndexMetaData
+            }
             parentIndexMetadata.updateIndexStatus(indexProviderName,
               indexModel.indexName,
               IndexStatus.ENABLED.name())
@@ -285,7 +284,15 @@ case class CarbonCreateIndexCommand(
       indexProvider: String): java.util.List[CarbonColumn] = {
     val indexCarbonColumns = parentTable.getIndexedColumns(indexColumns)
     val unique: util.Set[String] = new util.HashSet[String]
+    val properties = parentTable.getTableInfo.getFactTable.getTableProperties.asScala
+    val spatialProperty = properties.get(CarbonCommonConstants.SPATIAL_INDEX)
     for (indexColumn <- indexCarbonColumns.asScala) {
+      if (spatialProperty.isDefined &&
+          indexColumn.getColName.equalsIgnoreCase(spatialProperty.get.trim)) {
+        throw new MalformedIndexCommandException(String.format(
+          "Spatial Index column is not supported, column '%s' is spatial column",
+          indexColumn.getColName))
+      }
       if (indexProvider.equalsIgnoreCase(IndexType.LUCENE.getIndexProviderName)) {
         // validate whether it is string column.
         if (indexColumn.getDataType != DataTypes.STRING) {

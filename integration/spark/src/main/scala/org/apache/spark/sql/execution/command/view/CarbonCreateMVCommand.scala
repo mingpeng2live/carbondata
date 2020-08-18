@@ -95,19 +95,8 @@ case class CarbonCreateMVCommand(
       CreateMVPreExecutionEvent(session, systemDirectoryPath, identifier),
       operationContext)
 
-    val catalogFactory = new MVCatalogFactory[MVSchemaWrapper] {
-      override def newCatalog(): MVCatalog[MVSchemaWrapper] = {
-        new MVCatalogInSpark(session)
-      }
-    }
-
     // get mv catalog
-    var viewCatalog = viewManager.getCatalog(catalogFactory, false)
-      .asInstanceOf[MVCatalogInSpark]
-    if (!viewCatalog.session.equals(session)) {
-      viewCatalog = viewManager.getCatalog(catalogFactory, true)
-        .asInstanceOf[MVCatalogInSpark]
-    }
+    val viewCatalog = MVManagerInSpark.getOrReloadMVCatalog(session)
     val schema = doCreate(session, identifier, viewManager, viewCatalog)
 
     try {
@@ -172,10 +161,25 @@ case class CarbonCreateMVCommand(
     val viewSchema = getOutputSchema(logicalPlan)
     val relatedTables = getRelatedTables(logicalPlan)
     val relatedTableList = toCarbonTables(session, relatedTables)
+    val inputCols = logicalPlan.output.map(x =>
+      x.name
+    ).toList
     val relatedTableNames = new util.ArrayList[String](relatedTableList.size())
     // Check if load is in progress in any of the parent table mapped to the indexSchema
     relatedTableList.asScala.foreach {
       table =>
+        val tableProperties = table.getTableInfo.getFactTable.getTableProperties.asScala
+        // validate for spatial index column
+        val spatialProperty = tableProperties.get(CarbonCommonConstants.SPATIAL_INDEX)
+        if (spatialProperty.isDefined) {
+          val spatialColumn = spatialProperty.get.trim
+          if (inputCols.contains(spatialColumn)) {
+            val errorMessage =
+              s"$spatialColumn is a spatial index column and is not allowed for " +
+              s"the option(s): MATERIALIZED VIEW"
+            throw new MalformedCarbonCommandException(errorMessage)
+          }
+        }
         if (!table.getTableInfo.isTransactionalTable) {
           throw new MalformedCarbonCommandException(
             "Cannot create mv on non-transactional table")
@@ -402,9 +406,9 @@ case class CarbonCreateMVCommand(
   }
 
   private def getViewColumns(
-                              relatedTableColumns: Array[String],
-                              fieldsMap: scala.collection.mutable.LinkedHashMap[Field, MVField],
-                              viewSchema: Seq[Field]) = {
+      relatedTableColumns: Array[String],
+      fieldsMap: scala.collection.mutable.LinkedHashMap[Field, MVField],
+      viewSchema: Seq[Field]) = {
     val viewColumns = relatedTableColumns.flatMap(
       relatedTableColumn =>
         viewSchema.collect {
@@ -459,7 +463,7 @@ case class CarbonCreateMVCommand(
               Seq.empty
             }
           } else {
-            // if not found then countinue search for the rest of the elements. Because the rest
+            // if not found then continue search for the rest of the elements. Because the rest
             // of the elements can also decide if the table has to be partitioned or not.
             generatePartitionerField(tail, partitionerFields)
           }
@@ -472,7 +476,7 @@ case class CarbonCreateMVCommand(
   }
 
   private def checkQuery(logicalPlan: LogicalPlan): ModularPlan = {
-    // if there is limit in query string, throw exception, as its not a valid usecase
+    // if there is limit in query string, throw exception, as its not a valid use case
     logicalPlan match {
       case Limit(_, _) =>
         throw new MalformedCarbonCommandException("Materialized view does not support the query " +
@@ -589,7 +593,7 @@ case class CarbonCreateMVCommand(
         }.isDefined || needFullRefresh
         expression
     }
-    // TODO:- Remove this case when incremental datalaoding is supported for multiple tables
+    // TODO:- Remove this case when incremental data loading is supported for multiple tables
     logicalPlan.transformDown {
       case join@Join(_, _, _, _) =>
         needFullRefresh = true
@@ -707,26 +711,13 @@ case class CarbonCreateMVCommand(
       fieldsMap: scala.collection.mutable.LinkedHashMap[Field, MVField],
       viewSchema: Seq[Field],
       viewProperties: mutable.Map[String, String]): Unit = {
-    var viewTableOrder = Seq[String]()
-    val relatedTableOrder = relatedTable.getSortColumns.asScala
-    val relatedTableProperties =
-      relatedTable.getTableInfo.getFactTable.getTableProperties.asScala
-    relatedTableOrder.foreach(
-      relatedTableField =>
-        viewSchema.filter(
-          viewField =>
-            fieldsMap(viewField).aggregateFunction.isEmpty &&
-            fieldsMap(viewField).relatedFieldList.size == 1 &&
-            fieldsMap(viewField).relatedFieldList.head.fieldName.equalsIgnoreCase(
-                relatedTableField))
-          .map(viewField => viewTableOrder :+= viewField.column))
+    val sortColumns = relatedTable.getSortColumns.toArray(new Array[String](0))
+    val viewTableOrder = getViewColumns(sortColumns, fieldsMap, viewSchema)
     if (viewTableOrder.nonEmpty) {
       viewProperties.put(CarbonCommonConstants.SORT_COLUMNS, viewTableOrder.mkString(","))
     }
-    val sortScope = relatedTableProperties.get("sort_scope")
-    if (sortScope.isDefined) {
-      viewProperties.put("sort_scope", sortScope.get)
-    }
+    val relatedTableProperties = relatedTable.getTableInfo.getFactTable.getTableProperties.asScala
+    relatedTableProperties.get("sort_scope").foreach(x => viewProperties.put("sort_scope", x))
     viewProperties
       .put(CarbonCommonConstants.TABLE_BLOCKSIZE, relatedTable.getBlockSizeInMB.toString)
     viewProperties.put(CarbonCommonConstants.FLAT_FOLDER,

@@ -15,24 +15,21 @@
  * limitations under the License.
  */
 
-package org.apache.spark.sql.secondaryindex.Jobs
+package org.apache.spark.sql.secondaryindex.jobs
 
 import java.{lang, util}
-import java.text.SimpleDateFormat
 import java.util.concurrent.{Callable, Executors, ExecutorService, TimeUnit}
-import java.util.Date
 
 import scala.collection.JavaConverters._
 
 import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.mapreduce.{InputSplit, Job, TaskAttemptID, TaskType}
+import org.apache.hadoop.mapreduce.{InputSplit, TaskAttemptID, TaskType}
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat
 import org.apache.hadoop.mapreduce.task.TaskAttemptContextImpl
 import org.apache.spark.{Partition, TaskContext, TaskKilledException}
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.util.SparkSQLUtil
 
-import org.apache.carbondata.common.logging.LogServiceFactory
 import org.apache.carbondata.core.datastore.block.SegmentPropertiesAndSchemaHolder
 import org.apache.carbondata.core.index.{AbstractIndexJob, IndexInputFormat, IndexStoreManager}
 import org.apache.carbondata.core.index.dev.CacheableIndex
@@ -40,11 +37,11 @@ import org.apache.carbondata.core.indexstore.{BlockletIndexWrapper, TableBlockIn
 import org.apache.carbondata.core.indexstore.blockletindex.BlockIndex
 import org.apache.carbondata.core.metadata.schema.table.CarbonTable
 import org.apache.carbondata.core.util.CarbonUtil
+import org.apache.carbondata.hadoop.util.CarbonInputFormatUtil
 import org.apache.carbondata.spark.rdd.CarbonRDD
+import org.apache.carbondata.spark.util.CarbonSparkUtil
 
 class SparkBlockletIndexLoaderJob extends AbstractIndexJob {
-  private val LOGGER = LogServiceFactory
-    .getLogService(classOf[SparkBlockletIndexLoaderJob].getName)
   override def execute(carbonTable: CarbonTable,
       indexFormat: FileInputFormat[Void, BlockletIndexWrapper]): Unit = {
     val loader: BlockletIndexInputFormat = indexFormat
@@ -144,13 +141,10 @@ class IndexLoaderRDD(
     indexFormat: BlockletIndexInputFormat)
   extends CarbonRDD[(TableBlockIndexUniqueIdentifier, BlockletIndexDetailsWithSchema)](ss, Nil) {
 
-  private val jobTrackerId: String = {
-    val formatter = new SimpleDateFormat("yyyyMMddHHmm")
-    formatter.format(new Date())
-  }
+  private val jobTrackerId = CarbonInputFormatUtil.createJobTrackerID()
 
   override def internalGetPartitions: Array[Partition] = {
-    val job = Job.getInstance(new Configuration())
+    val job = CarbonSparkUtil.createHadoopJob()
     val splits = indexFormat.getSplits(job)
     splits.asScala.zipWithIndex.map(f => new IndexLoaderPartition(id, f._2, f._1)).toArray
   }
@@ -162,7 +156,7 @@ class IndexLoaderRDD(
     val inputSplit = split.asInstanceOf[IndexLoaderPartition].inputSplit
     val reader = indexFormat.createRecordReader(inputSplit, attemptContext)
     val iter = new Iterator[(TableBlockIndexUniqueIdentifier, BlockletIndexDetailsWithSchema)] {
-      // in case of success, failure or cancelation clear memory and stop execution
+      // in case of success, failure or cancellation clear memory and stop execution
       context.addTaskCompletionListener { _ =>
         reader.close()
       }

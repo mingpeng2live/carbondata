@@ -163,6 +163,7 @@ public final class CarbonProperties {
         validateCarbonCSVReadBufferSizeByte();
         break;
       case HANDOFF_SIZE:
+      case ENABLE_AUTO_HANDOFF:
         validateHandoffSize();
         break;
       case CARBON_TASK_DISTRIBUTION:
@@ -184,9 +185,6 @@ public final class CarbonProperties {
         break;
       case SORT_INTERMEDIATE_FILES_LIMIT:
         validateSortIntermediateFilesLimit();
-        break;
-      case ENABLE_AUTO_HANDOFF:
-        validateHandoffSize();
         break;
       case CARBON_SCHEDULER_MIN_REGISTERED_RESOURCES_RATIO:
         validateSchedulerMinRegisteredRatio();
@@ -619,20 +617,21 @@ public final class CarbonProperties {
   }
 
   private void validateEnableAutoHandoff() {
-    String offHeapSortStr = carbonProperties.getProperty(CarbonCommonConstants.ENABLE_OFFHEAP_SORT);
-    if (offHeapSortStr == null) {
-      carbonProperties.setProperty(CarbonCommonConstants.ENABLE_OFFHEAP_SORT,
-          CarbonCommonConstants.ENABLE_OFFHEAP_SORT_DEFAULT);
-      offHeapSortStr = carbonProperties.getProperty(CarbonCommonConstants.ENABLE_OFFHEAP_SORT);
+    String autoHandoffString =
+        carbonProperties.getProperty(CarbonCommonConstants.ENABLE_AUTO_HANDOFF);
+    if (autoHandoffString == null) {
+      carbonProperties.setProperty(CarbonCommonConstants.ENABLE_AUTO_HANDOFF,
+          CarbonCommonConstants.ENABLE_AUTO_HANDOFF_DEFAULT);
+      autoHandoffString = carbonProperties.getProperty(CarbonCommonConstants.ENABLE_AUTO_HANDOFF);
     }
-    boolean isValidBooleanValue = CarbonUtil.validateBoolean(offHeapSortStr);
+    boolean isValidBooleanValue = CarbonUtil.validateBoolean(autoHandoffString);
     if (!isValidBooleanValue) {
-      LOGGER.warn(String.format("The enable off heap sort value \"%s\" is invalid. " +
+      LOGGER.warn(String.format("The enable auto handoff value \"%s\" is invalid. " +
               "Using the default value \"%s\"",
-          offHeapSortStr,
-          CarbonCommonConstants.ENABLE_OFFHEAP_SORT_DEFAULT));
-      carbonProperties.setProperty(ENABLE_OFFHEAP_SORT,
-          CarbonCommonConstants.ENABLE_OFFHEAP_SORT_DEFAULT);
+          autoHandoffString,
+          CarbonCommonConstants.ENABLE_AUTO_HANDOFF_DEFAULT));
+      carbonProperties.setProperty(ENABLE_AUTO_HANDOFF,
+          CarbonCommonConstants.ENABLE_AUTO_HANDOFF_DEFAULT);
     }
   }
 
@@ -1192,7 +1191,7 @@ public final class CarbonProperties {
   }
 
   public long getHandoffSize() {
-    Long handoffSize;
+    long handoffSize;
     try {
       handoffSize = Long.parseLong(
           CarbonProperties.getInstance().getProperty(
@@ -1742,7 +1741,6 @@ public final class CarbonProperties {
     } else {
       switch (provider.toUpperCase()) {
         case CarbonCommonConstants.CARBON_INDEX_SCHEMA_STORAGE_DISK:
-          break;
         case  CarbonCommonConstants.CARBON_INDEX_SCHEMA_STORAGE_DATABASE:
           break;
         default:

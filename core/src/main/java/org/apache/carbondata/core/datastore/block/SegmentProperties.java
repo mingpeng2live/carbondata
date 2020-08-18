@@ -20,7 +20,6 @@ package org.apache.carbondata.core.datastore.block;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -33,6 +32,7 @@ import org.apache.carbondata.core.constants.CarbonCommonConstants;
 import org.apache.carbondata.core.metadata.datatype.DataType;
 import org.apache.carbondata.core.metadata.datatype.DataTypes;
 import org.apache.carbondata.core.metadata.encoder.Encoding;
+import org.apache.carbondata.core.metadata.schema.table.column.CarbonColumn;
 import org.apache.carbondata.core.metadata.schema.table.column.CarbonDimension;
 import org.apache.carbondata.core.metadata.schema.table.column.CarbonMeasure;
 import org.apache.carbondata.core.metadata.schema.table.column.ColumnSchema;
@@ -174,9 +174,7 @@ public class SegmentProperties {
 
   private void fillBlockToDimensionOrdinalMapping() {
     Set<Entry<Integer, Integer>> blocks = dimensionOrdinalToChunkMapping.entrySet();
-    Iterator<Entry<Integer, Integer>> blockItr = blocks.iterator();
-    while (blockItr.hasNext()) {
-      Entry<Integer, Integer> block = blockItr.next();
+    for (Entry<Integer, Integer> block : blocks) {
       Set<Integer> dimensionOrdinals = blockToDimensionOrdinalMapping.get(block.getValue());
       if (dimensionOrdinals == null) {
         dimensionOrdinals = new HashSet<Integer>(CarbonCommonConstants.DEFAULT_COLLECTION_SIZE);
@@ -256,12 +254,12 @@ public class SegmentProperties {
    */
   protected long getFingerPrinter() {
     if (this.fingerPrinter == Long.MAX_VALUE) {
-      long dimensionsFingerPrinter = getFingerprinter(this.dimensions.stream()
-              .map(t -> t.getColumnSchema()).collect(Collectors.toList()));
-      long measuresFingerPrinter = getFingerprinter(this.measures.stream()
-              .map(t -> t.getColumnSchema()).collect(Collectors.toList()));
-      long complexFingerPrinter = getFingerprinter(this.complexDimensions.stream()
-              .map(t -> t.getColumnSchema()).collect(Collectors.toList()));
+      long dimensionsFingerPrinter = getFingerPrinter(this.dimensions.stream()
+              .map(CarbonColumn::getColumnSchema).collect(Collectors.toList()));
+      long measuresFingerPrinter = getFingerPrinter(this.measures.stream()
+              .map(CarbonColumn::getColumnSchema).collect(Collectors.toList()));
+      long complexFingerPrinter = getFingerPrinter(this.complexDimensions.stream()
+              .map(CarbonColumn::getColumnSchema).collect(Collectors.toList()));
       this.fingerPrinter = (dimensionsFingerPrinter >> DIMENSIONS_FINGER_PRINTER_SHIFT)
               ^ (measuresFingerPrinter >> MEASURES_FINGER_PRINTER_SHIFT)
               ^ (complexFingerPrinter >> COMPLEX_FINGER_PRINTER_SHIFT);
@@ -269,7 +267,7 @@ public class SegmentProperties {
     return this.fingerPrinter;
   }
 
-  private long getFingerprinter(List<ColumnSchema> columns) {
+  private long getFingerPrinter(List<ColumnSchema> columns) {
     int counter = 0;
     ColumnSchema columnSchema = null;
     long fingerprint = Long.MAX_VALUE;

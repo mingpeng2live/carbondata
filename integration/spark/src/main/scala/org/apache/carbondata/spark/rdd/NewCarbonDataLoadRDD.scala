@@ -19,7 +19,7 @@ package org.apache.carbondata.spark.rdd
 
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
-import java.util.{Date, UUID}
+import java.util.UUID
 
 import scala.collection.mutable
 import scala.util.Try
@@ -45,6 +45,7 @@ import org.apache.carbondata.core.segmentmeta.SegmentMetaDataInfo
 import org.apache.carbondata.core.statusmanager.{LoadMetadataDetails, SegmentStatus}
 import org.apache.carbondata.core.util.{CarbonProperties, CarbonTimeStatisticsFactory, DataTypeUtil}
 import org.apache.carbondata.core.util.path.CarbonTablePath
+import org.apache.carbondata.hadoop.util.CarbonInputFormatUtil
 import org.apache.carbondata.processing.loading.{DataLoadExecutor, FailureCauses, TableProcessingOperations}
 import org.apache.carbondata.processing.loading.csvinput.{BlockDetails, CSVInputFormat, CSVRecordReaderIterator}
 import org.apache.carbondata.processing.loading.exception.NoRetryException
@@ -109,10 +110,7 @@ class NewCarbonDataLoadRDD[K, V](
 
   ss.sparkContext.setLocalProperty("spark.scheduler.pool", "DDL")
 
-  private val jobTrackerId: String = {
-    val formatter = new SimpleDateFormat("yyyyMMddHHmm")
-    formatter.format(new Date())
-  }
+  private val jobTrackerId = CarbonInputFormatUtil.createJobTrackerID()
 
   override def internalGetPartitions: Array[Partition] = {
     blocksGroupBy.zipWithIndex.map { b =>
@@ -121,7 +119,7 @@ class NewCarbonDataLoadRDD[K, V](
   }
 
   override def checkpoint() {
-    // Do nothing. Hadoop RDD should not be checkpointed.
+    // Do nothing. Hadoop RDD should not do checkpoint.
   }
 
   override def internalCompute(theSplit: Partition, context: TaskContext): Iterator[(K, V)] = {
@@ -311,7 +309,7 @@ class NewDataFrameLoaderRDD[K, V](
         // Initialize to set carbon properties
         loader.initialize()
         val executor = new DataLoadExecutor
-        // in case of success, failure or cancelation clear memory and stop execution
+        // in case of success, failure or cancellation clear memory and stop execution
         context
           .addTaskCompletionListener(new InsertTaskCompletionListener(executor,
             executionErrors,
@@ -368,10 +366,10 @@ class NewRddIterator(rddIter: Iterator[Row],
     carbonLoadModel: CarbonLoadModel,
     context: TaskContext) extends CarbonIterator[Array[AnyRef]] {
 
-  private var timeStampformatString = carbonLoadModel.getTimestampFormat
+  private var timestampFormatString = carbonLoadModel.getTimestampFormat
   private var dateFormatString = carbonLoadModel.getDateFormat
-  if (timeStampformatString.isEmpty) {
-    timeStampformatString = CarbonProperties.getInstance()
+  if (timestampFormatString.isEmpty) {
+    timestampFormatString = CarbonProperties.getInstance()
       .getProperty(CarbonCommonConstants.CARBON_TIMESTAMP_FORMAT,
         CarbonCommonConstants.CARBON_TIMESTAMP_DEFAULT_FORMAT)
   }
@@ -380,7 +378,7 @@ class NewRddIterator(rddIter: Iterator[Row],
       .getProperty(CarbonCommonConstants.CARBON_DATE_FORMAT,
         CarbonCommonConstants.CARBON_DATE_DEFAULT_FORMAT)
   }
-  private val timeStampFormat = new SimpleDateFormat(timeStampformatString)
+  private val timeStampFormat = new SimpleDateFormat(timestampFormatString)
   private val dateFormat = new SimpleDateFormat(dateFormatString)
   private val complexDelimiters = carbonLoadModel.getComplexDelimiters
   private val serializationNullFormat =
@@ -437,10 +435,10 @@ class LazyRddIterator(serializer: SerializerInstance,
     carbonLoadModel: CarbonLoadModel,
     context: TaskContext) extends CarbonIterator[Array[AnyRef]] {
 
-  private var timeStampformatString = carbonLoadModel.getTimestampFormat
+  private var timestampFormatString = carbonLoadModel.getTimestampFormat
   private var dateFormatString = carbonLoadModel.getDateFormat
-  if (timeStampformatString.isEmpty) {
-    timeStampformatString = CarbonProperties.getInstance()
+  if (timestampFormatString.isEmpty) {
+    timestampFormatString = CarbonProperties.getInstance()
       .getProperty(CarbonCommonConstants.CARBON_TIMESTAMP_FORMAT,
         CarbonCommonConstants.CARBON_TIMESTAMP_DEFAULT_FORMAT)
   }
@@ -449,13 +447,13 @@ class LazyRddIterator(serializer: SerializerInstance,
       .getProperty(CarbonCommonConstants.CARBON_DATE_FORMAT,
         CarbonCommonConstants.CARBON_DATE_DEFAULT_FORMAT)
   }
-  private val timeStampFormat = new SimpleDateFormat(timeStampformatString)
+  private val timeStampFormat = new SimpleDateFormat(timestampFormatString)
   private val dateFormat = new SimpleDateFormat(dateFormatString)
   private val complexDelimiters = carbonLoadModel.getComplexDelimiters
   private val serializationNullFormat =
     carbonLoadModel.getSerializationNullFormat.split(CarbonCommonConstants.COMMA, 2)(1)
-  // the order of fields in dataframe and createTable may be different, here we need to know whether
-  // each fields in dataframe is Varchar or not.
+  // the order of fields in DataFrame and createTable may be different, here we need to know whether
+  // each fields in data DataFrame is Varchar or not.
   import scala.collection.JavaConverters._
   private val isVarcharTypeMapping = {
     val col2VarcharType = carbonLoadModel.getCarbonDataLoadSchema.getCarbonTable
