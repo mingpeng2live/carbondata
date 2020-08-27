@@ -31,7 +31,7 @@ import org.apache.spark.sql.hive.CarbonMetaStore
 import org.apache.spark.sql.parser.CarbonSparkSqlParserUtil
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.streaming.OutputMode
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.types.{Metadata, StructField, StructType}
 import org.apache.spark.sql.util.CarbonException
 
 import org.apache.carbondata.common.exceptions.sql.MalformedCarbonCommandException
@@ -40,8 +40,8 @@ import org.apache.carbondata.core.constants.CarbonCommonConstants
 import org.apache.carbondata.core.datastore.impl.FileFactory
 import org.apache.carbondata.core.metadata.schema.SchemaEvolutionEntry
 import org.apache.carbondata.core.metadata.schema.table.TableInfo
-import org.apache.carbondata.core.util.path.CarbonTablePath
 import org.apache.carbondata.core.util.CarbonUtil
+import org.apache.carbondata.core.util.path.CarbonTablePath
 import org.apache.carbondata.spark.CarbonOption
 import org.apache.carbondata.spark.util.{CarbonScalaUtil, CarbonSparkUtil}
 import org.apache.carbondata.streaming.{CarbonStreamException, CarbonStreamingQueryListener, StreamSinkFactory}
@@ -281,10 +281,22 @@ object CarbonSource {
       isExternal)
     val updatedFormat = CarbonToSparkAdapter
       .getUpdatedStorageFormat(storageFormat, updatedTableProperties, tableInfo.getTablePath)
+    var catalogSchema = table.schema
+    val columnSchemas = tableInfo.getFactTable.getListOfColumns
+    val spatialProperty = updatedTableProperties.get(CarbonCommonConstants.SPATIAL_INDEX)
+    // In case of geo table, an additional spatial column is generated.
+    // Update schema with new column.
+    if (spatialProperty.isDefined) {
+      val spatialColumn = columnSchemas.asScala
+        .find(schema => schema.getColumnName.equalsIgnoreCase(spatialProperty.get.trim)).get
+      val additionalSchema = StructType(Array(StructField(spatialColumn.getColumnName,
+        org.apache.spark.sql.types.DataTypes.LongType, true, Metadata.empty)))
+      catalogSchema = StructType(additionalSchema ++ catalogSchema)
+    }
     val updatedSchema = if (isExternal) {
-      table.schema
+      catalogSchema
     } else {
-      CarbonSparkUtil.updateStruct(table.schema)
+      CarbonSparkUtil.updateStruct(catalogSchema)
     }
     table.copy(
       storage = updatedFormat,

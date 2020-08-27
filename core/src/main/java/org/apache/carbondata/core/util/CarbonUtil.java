@@ -2782,10 +2782,14 @@ public final class CarbonUtil {
         } else {
           // Replace / with # on partition director to support multi level partitioning. And access
           // them all as a single entity.
-          blockId =
-              partitionDir.replace(CarbonCommonConstants.FILE_SEPARATOR, "#")
-                  + CarbonCommonConstants.FILE_SEPARATOR + segmentId
-                  + CarbonCommonConstants.FILE_SEPARATOR + blockName;
+          if (partitionDir.isEmpty()) {
+            blockId = segmentId + CarbonCommonConstants.FILE_SEPARATOR + blockName;
+          } else {
+            blockId = partitionDir.replace(CarbonCommonConstants.FILE_SEPARATOR, "#")
+                + CarbonCommonConstants.FILE_SEPARATOR + segmentId
+                + CarbonCommonConstants.FILE_SEPARATOR + blockName;
+          }
+
         }
       }
     } else {
@@ -3376,5 +3380,61 @@ public final class CarbonUtil {
       return CarbonCommonConstants.INDEX_CACHE_EXPIRATION_TIME_IN_SECONDS_DEFAULT;
     }
     return Integer.parseInt(cacheExpirationTime);
+  }
+
+  /**
+   * delete the folder depend on the queryId
+   * @param queryId query id
+   * @throws IOException
+   */
+  public static void deleteTempFolderForIndexServer(String queryId)
+          throws IOException {
+    final String path = getIndexServerTempPath();
+    if (queryId == null) {
+      return;
+    }
+    String pathName = path + CarbonCommonConstants.FILE_SEPARATOR + queryId;
+    String indexServerTmpDirPath = CarbonUtil
+            .checkAndAppendFileSystemURIScheme(pathName);
+    if (!FileFactory
+            .deleteFile(indexServerTmpDirPath)) {
+      LOGGER.info("Unable to delete directory: " + pathName);
+    } else {
+      LOGGER.info("Successfully delete directory: " + pathName);
+    }
+  }
+
+  /**
+   * use to clean the tmp folder, avoid exceeding the limit on the number of files.
+   */
+  public static void cleanTempFolderForIndexServer()throws IOException  {
+    final String folderPath = getIndexServerTempPath();
+    String indexServerTmpDirPath = CarbonUtil
+            .checkAndAppendFileSystemURIScheme(folderPath);
+    if (FileFactory.deleteFile(indexServerTmpDirPath)) {
+      LOGGER.info("Complete " + indexServerTmpDirPath + " file cleanup.");
+    } else {
+      LOGGER.info("Failed " + indexServerTmpDirPath + " file cleanup.");
+    }
+  }
+
+  /**
+   * use to clean the tmp folder, avoid exceeding the limit on the number of files.
+   */
+  public static void agingTempFolderForIndexServer(long agingTime)throws
+          IOException, InterruptedException {
+    final String folderPath = getIndexServerTempPath();
+    if (FileFactory.isFileExist(folderPath)) {
+      List<CarbonFile> carbonFileList = FileFactory.getFolderList(folderPath);
+      carbonFileList.stream().filter(carbonFile -> carbonFile.getLastModifiedTime() < agingTime
+      ).forEach(delFile -> {
+        try {
+          deleteFoldersAndFiles(delFile);
+          LOGGER.info("delete file + " + delFile.getPath());
+        } catch (IOException | InterruptedException e) {
+          LOGGER.error("aging temp folder for index server failed.");
+        }
+      });
+    }
   }
 }

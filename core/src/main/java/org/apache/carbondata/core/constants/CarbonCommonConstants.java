@@ -2456,4 +2456,30 @@ public final class CarbonCommonConstants {
    * property which defines the insert stage flow
    */
   public static final String IS_INSERT_STAGE = "is_insert_stage";
+
+  /**
+   * index server temp folder aging period
+   */
+  @CarbonProperty
+  public static final String CARBON_INDEXSERVER_TEMPFOLDER_DELETETIME =
+          "carbon.indexserver.tempfolder.deletetime";
+
+  /**
+   * index server temp folder aging period default value 3hours.
+   */
+  public static final String CARBON_INDEXSERVER_TEMPFOLDER_DELETETIME_DEFAULT = "10800000";
+
+  public static final String STRING_LENGTH_EXCEEDED_MESSAGE =
+      "Record %s of column %s exceeded " + MAX_CHARS_PER_COLUMN_DEFAULT +
+          " characters. Please consider long string data type.";
+
+  /**
+   * property which defines the presto query
+   */
+  @CarbonProperty public static final String IS_QUERY_FROM_PRESTO = "is_query_from_presto";
+
+  /**
+   * property which defines the presto query default value
+   */
+  public static final String IS_QUERY_FROM_PRESTO_DEFAULT = "false";
 }

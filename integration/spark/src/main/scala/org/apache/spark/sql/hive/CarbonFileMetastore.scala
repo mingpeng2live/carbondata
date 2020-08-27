@@ -67,7 +67,7 @@ private object CarbonFileMetastore {
   final val tableModifiedTimeStore = new ConcurrentHashMap[String, Long]()
 
   def checkIfRefreshIsNeeded(absoluteTableIdentifier: AbsoluteTableIdentifier,
-      localTimeStamp: Long): Boolean = synchronized {
+      localTimeStamp: Long): Boolean = {
     val schemaFilePath = CarbonTablePath.getSchemaFilePath(absoluteTableIdentifier.getTablePath)
     val schemaCarbonFile = FileFactory.getCarbonFile(schemaFilePath)
     if (schemaCarbonFile.exists()) {
@@ -81,9 +81,21 @@ private object CarbonFileMetastore {
         case None => true
       }
       if (isSchemaModified) {
-        CarbonMetadata.getInstance().removeTable(absoluteTableIdentifier
-          .getCarbonTableIdentifier.getTableUniqueName)
-        IndexStoreManager.getInstance().clearIndex(absoluteTableIdentifier)
+        if (CarbonMetadata.getInstance()
+              .getCarbonTable(absoluteTableIdentifier
+                .getCarbonTableIdentifier
+                .getTableUniqueName) != null) {
+          synchronized {
+            if (CarbonMetadata.getInstance()
+                  .getCarbonTable(absoluteTableIdentifier
+                    .getCarbonTableIdentifier
+                    .getTableUniqueName) != null) {
+              CarbonMetadata.getInstance().removeTable(absoluteTableIdentifier
+                .getCarbonTableIdentifier.getTableUniqueName)
+              IndexStoreManager.getInstance().clearIndex(absoluteTableIdentifier)
+            }
+          }
+        }
         true
       } else {
         localTimeStamp != newTime
@@ -226,7 +238,8 @@ class CarbonFileMetastore extends CarbonMetaStore {
         // Here, catalogTable will have spatial column in schema which is used to build carbon
         // table. As spatial column is not supposed to be present in user-defined columns,
         // removing it here. Later from tableproperties the column will be added in carbonTable.
-        val spatialProperty = catalogTable.properties.get(CarbonCommonConstants.SPATIAL_INDEX)
+        val spatialProperty = catalogTable.storage.properties
+          .get(CarbonCommonConstants.SPATIAL_INDEX)
         if (spatialProperty.isDefined) {
           val originalSchema = StructType(catalogTable.schema.
             filterNot(_.name.equalsIgnoreCase(spatialProperty.get.trim)))
