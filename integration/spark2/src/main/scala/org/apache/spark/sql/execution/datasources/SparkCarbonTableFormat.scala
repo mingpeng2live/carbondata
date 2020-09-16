@@ -22,7 +22,6 @@ import java.util.concurrent.atomic.AtomicLong
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
-
 import org.apache.hadoop.fs.{FileStatus, Path}
 import org.apache.hadoop.io.NullWritable
 import org.apache.hadoop.mapreduce.{Job, TaskAttemptContext}
@@ -33,7 +32,6 @@ import org.apache.spark.sql.catalyst.catalog.ExternalCatalogUtils
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.sources.DataSourceRegister
 import org.apache.spark.sql.types._
-
 import org.apache.carbondata.core.constants.{CarbonCommonConstants, CarbonLoadOptionConstants}
 import org.apache.carbondata.core.datastore.compression.CompressorFactory
 import org.apache.carbondata.core.datastore.impl.FileFactory
@@ -47,9 +45,11 @@ import org.apache.carbondata.core.util.path.CarbonTablePath
 import org.apache.carbondata.hadoop.api.{CarbonOutputCommitter, CarbonTableOutputFormat}
 import org.apache.carbondata.hadoop.api.CarbonTableOutputFormat.CarbonRecordWriter
 import org.apache.carbondata.hadoop.internal.ObjectArrayWritable
+import org.apache.carbondata.processing.loading.complexobjects.{ArrayObject, StructObject}
 import org.apache.carbondata.processing.loading.model.{CarbonLoadModel, CarbonLoadModelBuilder, LoadOption}
 import org.apache.carbondata.processing.util.CarbonBadRecordUtil
 import org.apache.carbondata.spark.util.{CarbonScalaUtil, CommonUtil, Util}
+import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
 
 class SparkCarbonTableFormat
   extends FileFormat
@@ -174,7 +174,7 @@ with Serializable {
         val taskNumber = generateTaskNumber(path, context, model.getSegmentId)
         val storeLocation = CommonUtil.getTempStoreLocations(taskNumber)
         CarbonTableOutputFormat.setTempStoreLocations(context.getConfiguration, storeLocation)
-        new CarbonOutputWriter(path, context, dataSchema.map(_.dataType), taskNumber, model)
+        new CarbonOutputWriter(path, context, dataSchema.fields, taskNumber, model)
       }
 
       /**
@@ -234,10 +234,13 @@ private trait AbstractCarbonOutputWriter {
 
 private class CarbonOutputWriter(path: String,
     context: TaskAttemptContext,
-    fieldTypes: Seq[DataType],
+    fieldTypes: Array[StructField],
     taskNo : String,
     model: CarbonLoadModel)
   extends OutputWriter with AbstractCarbonOutputWriter {
+
+  // TODO add
+  private val cutOffDate = Integer.MAX_VALUE >> 1
 
   val converter = new DataTypeConverterImpl
 
@@ -349,23 +352,39 @@ private class CarbonOutputWriter(path: String,
     }.getRecordWriter(context).asInstanceOf[CarbonRecordWriter]
   }
 
-  // TODO Implement writesupport interface to support writing Row directly to recordwriter
+//  // TODO Implement writesupport interface to support writing Row directly to recordwriter
+//  def writeCarbon(row: InternalRow): Unit = {
+//    val data = new Array[AnyRef](fieldTypes.length + partitionData.length)
+//    var i = 0
+//    while (i < fieldTypes.length) {
+//      if (!row.isNullAt(i)) {
+//        fieldTypes(i) match {
+//          case StringType =>
+//            data(i) = row.getString(i)
+//          case d: DecimalType =>
+//            data(i) = row.getDecimal(i, d.precision, d.scale).toJavaBigDecimal
+//          case other =>
+//            data(i) = row.get(i, other)
+//        }
+//      }
+//      i += 1
+//    }
+//    if (partitionData.length > 0) {
+//      System.arraycopy(partitionData, 0, data, fieldTypes.length, partitionData.length)
+//    }
+//    writable.set(data)
+//    recordWriter.write(NullWritable.get(), writable)
+//  }
+
+
+  override def writeInternal(row: InternalRow): Unit = {
+    writeCarbon(row)
+  }
+
+  //----------- TODO add --------------
+
   def writeCarbon(row: InternalRow): Unit = {
-    val data = new Array[AnyRef](fieldTypes.length + partitionData.length)
-    var i = 0
-    while (i < fieldTypes.length) {
-      if (!row.isNullAt(i)) {
-        fieldTypes(i) match {
-          case StringType =>
-            data(i) = row.getString(i)
-          case d: DecimalType =>
-            data(i) = row.getDecimal(i, d.precision, d.scale).toJavaBigDecimal
-          case other =>
-            data(i) = row.get(i, other)
-        }
-      }
-      i += 1
-    }
+    val data: Array[AnyRef] = extractData(row, fieldTypes)
     if (partitionData.length > 0) {
       System.arraycopy(partitionData, 0, data, fieldTypes.length, partitionData.length)
     }
@@ -373,10 +392,95 @@ private class CarbonOutputWriter(path: String,
     recordWriter.write(NullWritable.get(), writable)
   }
 
-
-  override def writeInternal(row: InternalRow): Unit = {
-    writeCarbon(row)
+  /**
+    * Convert the internal row to carbondata understandable object
+    */
+  private def extractData(row: InternalRow, fieldTypes: Array[StructField]): Array[AnyRef] = {
+    val data = new Array[AnyRef](fieldTypes.length + partitionData.length)
+    var i = 0
+    while (i < fieldTypes.length) {
+      if (!row.isNullAt(i)) {
+        fieldTypes(i).dataType match {
+          case StringType =>
+            data(i) = row.getString(i)
+          case BinaryType =>
+            data(i) = row.getBinary(i)
+          case d: DecimalType =>
+            data(i) = row.getDecimal(i, d.precision, d.scale).toJavaBigDecimal
+          case s: StructType =>
+              data(i) = new StructObject(extractData(row.getStruct(i, s.fields.length), s.fields))
+          case a: ArrayType =>
+              data(i) = new ArrayObject(extractData(row.getArray(i), a.elementType))
+          case m: MapType =>
+              data(i) = extractMapData(row.getMap(i), m)
+          case d: DateType =>
+            data(i) = (row.getInt(i) + cutOffDate).asInstanceOf[AnyRef]
+          case d: TimestampType =>
+            data(i) = (row.getLong(i) / 1000).asInstanceOf[AnyRef]
+          case other =>
+            data(i) = row.get(i, other)
+        }
+      } else {
+        setNull(fieldTypes(i).dataType, data, i)
+      }
+      i += 1
+    }
+    data
   }
+
+  private def extractMapData(data: AnyRef, mapType: MapType): ArrayObject = {
+    val mapData = data.asInstanceOf[MapData]
+    val keys = extractData(mapData.keyArray(), mapType.keyType)
+    val values = extractData(mapData.valueArray(), mapType.valueType)
+    new ArrayObject(keys.zip(values).map { case (key, value) =>
+      new StructObject(Array(key, value))
+    })
+  }
+
+  private def setNull(dataType: DataType, data: Array[AnyRef], i: Int) = {
+    dataType match {
+      case d: DateType =>
+        // 1  as treated as null in carbon
+        data(i) = 1.asInstanceOf[AnyRef]
+      case _ =>
+    }
+  }
+
+  /**
+    * Convert the internal row to carbondata understandable object
+    */
+  private def extractData(row: ArrayData, dataType: DataType): Array[AnyRef] = {
+    val data = new Array[AnyRef](row.numElements())
+    var i = 0
+    while (i < data.length) {
+      if (!row.isNullAt(i)) {
+        dataType match {
+          case StringType =>
+            data(i) = row.getUTF8String(i).toString
+          case d: DecimalType =>
+            data(i) = row.getDecimal(i, d.precision, d.scale).toJavaBigDecimal
+          case s: StructType =>
+            data(i) = new StructObject(extractData(row.getStruct(i, s.fields.length), s.fields))
+          case a: ArrayType =>
+            data(i) = new ArrayObject(extractData(row.getArray(i), a.elementType))
+          case m: MapType =>
+            data(i) = extractMapData(row.getMap(i), m)
+          case d: DateType =>
+            data(i) = (row.getInt(i) + cutOffDate).asInstanceOf[AnyRef]
+          case d: TimestampType =>
+            data(i) = (row.getLong(i) / 1000).asInstanceOf[AnyRef]
+          case other => data(i) = row.get(i, dataType)
+        }
+      } else {
+        setNull(dataType, data, i)
+      }
+      i += 1
+    }
+    data
+  }
+
+  //----------- TODO add --------------
+
 
   override def close(): Unit = {
     recordWriter.close(context)

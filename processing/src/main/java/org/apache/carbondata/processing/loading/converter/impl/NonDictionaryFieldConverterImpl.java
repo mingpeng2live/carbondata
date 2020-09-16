@@ -62,8 +62,8 @@ public class NonDictionaryFieldConverterImpl implements FieldConverter {
       throws RuntimeException {
     String dimensionValue = (String) value;
     if (null == dimensionValue && column.getDataType() != DataTypes.STRING) {
-      logHolder.setReason(
-          CarbonDataProcessorUtil.prepareFailureReason(column.getColName(), column.getDataType()));
+//      logHolder.setReason(
+//          CarbonDataProcessorUtil.prepareFailureReason(column.getColName(), column.getDataType()));
       return getNullValue();
     } else if (dimensionValue == null || dimensionValue.equals(nullFormat)) {
       return getNullValue();
@@ -81,9 +81,9 @@ public class NonDictionaryFieldConverterImpl implements FieldConverter {
           if (dataType == DataTypes.STRING
               && parsedValue.length > CarbonCommonConstants.MAX_CHARS_PER_COLUMN_DEFAULT) {
             throw new CarbonDataLoadingException(String.format(
-                "Dataload failed, String size cannot exceed %d bytes,"
+                "Dataload failed, String size cannot exceed %d bytes, column name: %s"
                     + " please consider long string data type",
-                CarbonCommonConstants.MAX_CHARS_PER_COLUMN_DEFAULT));
+                CarbonCommonConstants.MAX_CHARS_PER_COLUMN_DEFAULT, column.getColName()));
           }
           return parsedValue;
         } else {
@@ -92,9 +92,9 @@ public class NonDictionaryFieldConverterImpl implements FieldConverter {
           if (dataType == DataTypes.STRING && parsedValue.toString().length()
               > CarbonCommonConstants.MAX_CHARS_PER_COLUMN_DEFAULT) {
             throw new CarbonDataLoadingException(String.format(
-                "Dataload failed, String size cannot exceed %d bytes,"
+                "Dataload failed, String size cannot exceed %d bytes, column name: %s"
                     + " please consider long string data type",
-                CarbonCommonConstants.MAX_CHARS_PER_COLUMN_DEFAULT));
+                CarbonCommonConstants.MAX_CHARS_PER_COLUMN_DEFAULT, column.getColName()));
           }
           return parsedValue;
         }

@@ -73,11 +73,15 @@ class DataLoadPartitionCoalescer(prev: RDD[_], nodeList: Array[String]) {
   val prevPartitions = prev.partitions
   val numOfParts = Math.max(1, Math.min(nodeList.length, prevPartitions.length))
   // host => partition id list
+
   val hostMapPartitionIds = new HashMap[String, LinkedHashSet[Int]]
   // partition id => host list
   val partitionIdMapHosts = new HashMap[Int, ArrayBuffer[String]]
   val noLocalityPartitions = new ArrayBuffer[Int]
   var noLocality = true
+
+  LOGGER.info("nodeList: " + nodeList.length + " numOfParts: " + numOfParts + " prevPartitions: " + prevPartitions.length)
+
   /**
    * assign a task location for a partition
    */
@@ -96,6 +100,7 @@ class DataLoadPartitionCoalescer(prev: RDD[_], nodeList: Array[String]) {
     // initialize hostMapPartitionIds
     nodeList.foreach { node =>
       val map = new LinkedHashSet[Int]
+      LOGGER.info("add: " + node)
       hostMapPartitionIds.put(node, map)
     }
     // collect partitions for each node
@@ -281,6 +286,8 @@ class DataLoadPartitionCoalescer(prev: RDD[_], nodeList: Array[String]) {
     // non empty host array
     var tempNoEmptyHosts = hostMapPartitionIdsSeq.filter(_._2.nonEmpty)
 
+    LOGGER.info("new hostMapPartitionIdsSeq : " + hostMapPartitionIdsSeq.length + " emptyHosts: " + emptyHosts.length + "  tempNoEmptyHosts: " + tempNoEmptyHosts.length)
+
     // 1. do locality repartition
     // sort host and partitions
     tempNoEmptyHosts = sortHostAndPartitions(tempNoEmptyHosts)
@@ -297,6 +304,9 @@ class DataLoadPartitionCoalescer(prev: RDD[_], nodeList: Array[String]) {
         localityResult += templocalityResult(index)
       }
     }
+
+    LOGGER.info("new emptyHosts : " + emptyHosts.length + " noEmptyHosts: " + noEmptyHosts.length + "  localityResult: " + localityResult.length)
+
     // 2. do no locality repartition
     // assign no locality partitions to all hosts
     val noLocalityResult = assignPartitionNoLocality(emptyHosts, noEmptyHosts, localityResult)

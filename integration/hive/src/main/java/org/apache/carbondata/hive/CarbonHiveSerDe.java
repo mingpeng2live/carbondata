@@ -16,11 +16,7 @@
  */
 package org.apache.carbondata.hive;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Properties;
+import java.util.*;
 import javax.annotation.Nullable;
 
 import org.apache.hadoop.conf.Configuration;
@@ -31,11 +27,7 @@ import org.apache.hadoop.hive.serde2.SerDeSpec;
 import org.apache.hadoop.hive.serde2.SerDeStats;
 import org.apache.hadoop.hive.serde2.io.DoubleWritable;
 import org.apache.hadoop.hive.serde2.io.ShortWritable;
-import org.apache.hadoop.hive.serde2.objectinspector.ListObjectInspector;
-import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
-import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
-import org.apache.hadoop.hive.serde2.objectinspector.StructField;
-import org.apache.hadoop.hive.serde2.objectinspector.StructObjectInspector;
+import org.apache.hadoop.hive.serde2.objectinspector.*;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.DateObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.DoubleObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.HiveDecimalObjectInspector;
@@ -48,10 +40,7 @@ import org.apache.hadoop.hive.serde2.typeinfo.StructTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
-import org.apache.hadoop.io.ArrayWritable;
-import org.apache.hadoop.io.IntWritable;
-import org.apache.hadoop.io.LongWritable;
-import org.apache.hadoop.io.Writable;
+import org.apache.hadoop.io.*;
 
 /**
  * A serde class for Carbondata.
@@ -161,6 +150,24 @@ public class CarbonHiveSerDe extends AbstractSerDe {
     return null;
   }
 
+  private MapWritable createMap(Object obj, MapObjectInspector inspector) throws SerDeException {
+    Map<?, ?> sourceMap = inspector.getMap(obj);
+    MapWritable mapWritable = new MapWritable();
+    if (sourceMap != null && !sourceMap.isEmpty()) {
+      ObjectInspector koi = inspector.getMapKeyObjectInspector();
+      ObjectInspector voi = inspector.getMapValueObjectInspector();
+      for (Map.Entry<?, ?> itm : sourceMap.entrySet()) {
+        Object keyObj = itm.getKey();
+        Object valObj = itm.getValue();
+        Writable newKeyObj = createObject(keyObj, koi);
+        Writable newValObj = createObject(valObj, voi);
+        mapWritable.put(newKeyObj, newValObj);
+      }
+      return mapWritable;
+    }
+    return null;
+  }
+
   private Writable createPrimitive(Object obj, PrimitiveObjectInspector inspector)
       throws SerDeException {
     if (obj == null) {
@@ -199,9 +206,14 @@ public class CarbonHiveSerDe extends AbstractSerDe {
         return createArray(obj, (ListObjectInspector) inspector);
       case PRIMITIVE:
         return createPrimitive(obj, (PrimitiveObjectInspector) inspector);
+      case MAP:
+        return createMap(obj, (MapObjectInspector) inspector);
     }
     throw new SerDeException("Unknown data type" + inspector.getCategory());
   }
+
+
+
 
   @Override public SerDeStats getSerDeStats() {
     // must be different

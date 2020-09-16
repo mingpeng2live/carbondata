@@ -17,6 +17,7 @@
 
 package org.apache.carbondata.spark.load
 
+import java.nio.ByteBuffer
 import java.util
 
 import com.univocity.parsers.common.TextParsingException
@@ -26,12 +27,15 @@ import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.GenericInternalRow
-
 import org.apache.carbondata.common.logging.LogServiceFactory
+import org.apache.carbondata.core.cache.dictionary.{Dictionary, DictionaryColumnUniqueIdentifier}
+import org.apache.carbondata.core.cache.{Cache, CacheProvider, CacheType}
 import org.apache.carbondata.core.constants.CarbonCommonConstants
 import org.apache.carbondata.core.datastore.exception.CarbonDataWriterException
 import org.apache.carbondata.core.datastore.row.CarbonRow
+import org.apache.carbondata.core.metadata.schema.table.column.{CarbonColumn}
 import org.apache.carbondata.core.util.{CarbonProperties, ThreadLocalSessionInfo}
+import org.apache.carbondata.hadoop.stream.CarbonStreamInputFormat
 import org.apache.carbondata.processing.loading._
 import org.apache.carbondata.processing.loading.converter.impl.RowConverterImpl
 import org.apache.carbondata.processing.loading.exception.CarbonDataLoadingException
@@ -46,6 +50,8 @@ import org.apache.carbondata.processing.store.{CarbonFactHandler, CarbonFactHand
 import org.apache.carbondata.processing.util.{CarbonBadRecordUtil, CarbonDataProcessorUtil}
 import org.apache.carbondata.spark.rdd.{NewRddIterator, StringArrayRow}
 import org.apache.carbondata.spark.util.CommonUtil
+
+import scala.collection.JavaConversions._
 
 object DataLoadProcessorStepOnSpark {
   private val LOGGER = LogServiceFactory.getLogService(this.getClass.getCanonicalName)
@@ -153,6 +159,27 @@ object DataLoadProcessorStepOnSpark {
     val rowConverter = new RowConverterImpl(conf.getDataFields, conf, badRecordLogger)
     rowConverter.initialize()
 
+    // TODO add
+    val carbonColumnList = new util.ArrayList[CarbonColumn]()
+    val complexColumnIndex = new util.ArrayList[Int]()
+    val fields = conf.getDataFields
+    for (index <- 0 until fields.length){
+      if (fields(index).getColumn.isComplex) {
+        complexColumnIndex.add(index)
+      }
+      carbonColumnList.add(fields(index).getColumn)
+    }
+    val cacheProvider = CacheProvider.getInstance
+    val cache = cacheProvider.createCache(CacheType.FORWARD_DICTIONARY)
+      .asInstanceOf[Cache[DictionaryColumnUniqueIdentifier, Dictionary]]
+
+    val carbonTable = conf.getTableSpec.getCarbonTable
+    //    val carbonColumnList = carbonTable.getDimensionByTableName(carbonTable.getTableName)
+    val storageColumns = carbonColumnList.toArray(new Array[CarbonColumn](carbonColumnList.size))
+    val queryTypes = CarbonStreamInputFormat.getComplexDimensions(carbonTable, storageColumns, cache)
+
+
+
     TaskContext.get().addTaskCompletionListener { context =>
       val hasBadRecord: Boolean = CarbonBadRecordUtil.hasBadRecord(model)
       close(conf, badRecordLogger, rowConverter)
@@ -179,6 +206,13 @@ object DataLoadProcessorStepOnSpark {
           row = new CarbonRow(rowParser.parseRow(rows.next()))
         }
         row = rowConverter.convert(row)
+
+        // TODO add
+        for(index <- complexColumnIndex) {
+          val value = row.getObject(index).asInstanceOf[Array[Byte]]
+          row.update(queryTypes(index).getDataBasedOnDataType(ByteBuffer.wrap(value)), index)
+        }
+
         rowCounter.add(1)
         row
       }

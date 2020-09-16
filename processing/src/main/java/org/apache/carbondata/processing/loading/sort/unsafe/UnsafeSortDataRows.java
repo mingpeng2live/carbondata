@@ -392,8 +392,8 @@ public class UnsafeSortDataRows {
               + '_' + parameters.getRangeId() + '_' + System.nanoTime()
               + CarbonCommonConstants.SORT_TEMP_FILE_EXT);
           writeDataToFile(page, sortTempFile);
-          LOGGER.info("Time taken to sort row page with size" + page.getBuffer().getActualSize()
-              + " and write is: " + (System.currentTimeMillis() - startTime) + ": location:"
+          LOGGER.info("Time taken to sort row page with size " + page.getBuffer().getActualSize()
+              + " and write is: " + (System.currentTimeMillis() - startTime) + ", location:"
               + sortTempFile + ", sort temp file size in MB is "
               + sortTempFile.length() * 0.1 * 10 / 1024 / 1024);
           page.freeMemory();

@@ -74,8 +74,8 @@ public class DirectDictionaryFieldConverterImpl extends AbstractDictionaryFieldC
       throws RuntimeException {
     String literalValue = (String) value;
     if (literalValue == null) {
-      logHolder.setReason(
-          CarbonDataProcessorUtil.prepareFailureReason(column.getColName(), column.getDataType()));
+//      logHolder.setReason(
+//          CarbonDataProcessorUtil.prepareFailureReason(column.getColName(), column.getDataType()));
       return CarbonCommonConstants.DIRECT_DICT_VALUE_NULL;
     } else if (literalValue.equals(nullFormat)) {
       return CarbonCommonConstants.DIRECT_DICT_VALUE_NULL;
@@ -89,7 +89,7 @@ public class DirectDictionaryFieldConverterImpl extends AbstractDictionaryFieldC
                 column.getColName(), column.getDataType());
             logHolder.getColumnMessageMap().put(column.getColName(), message);
           }
-          logHolder.setReason(message);
+//          logHolder.setReason(message);
         }
       }
       return key;

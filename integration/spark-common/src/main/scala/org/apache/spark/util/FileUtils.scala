@@ -78,7 +78,8 @@ object FileUtils {
         val carbonFile = FileFactory.getCarbonFile(filePath, hadoopConf)
         if (!carbonFile.exists()) {
           throw new DataLoadingException(
-            s"The input file does not exist: ${CarbonUtil.removeAKSK(filePaths(i))}" )
+            s"The input file does not exist: ${CarbonUtil.removeAKSK(filePaths(i))}" +
+              s"input: $inputPath filePts: ${filePaths(i)} carbonFile: ${carbonFile.toString}" )
         }
         getPathsFromCarbonFile(carbonFile, stringBuild, hadoopConf)
       }

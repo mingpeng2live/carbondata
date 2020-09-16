@@ -250,7 +250,7 @@ public final class CarbonLoaderUtil {
     try {
       if (carbonLock.lockWithRetries(retryCount, maxTimeout)) {
         LOGGER.info(
-            "Acquired lock for table" + loadModel.getDatabaseName() + "." + loadModel.getTableName()
+            "Acquired lock for table " + loadModel.getDatabaseName() + "." + loadModel.getTableName()
                 + " for table status updation");
         LoadMetadataDetails[] listOfLoadFolderDetailsArray =
             SegmentStatusManager.readLoadMetadata(
@@ -378,11 +378,11 @@ public final class CarbonLoaderUtil {
     } finally {
       if (carbonLock.unlock()) {
         LOGGER.info(
-            "Table unlocked successfully after table status updation" + loadModel.getDatabaseName()
+            "Table unlocked successfully after table status updation " + loadModel.getDatabaseName()
                 + "." + loadModel.getTableName());
       } else {
         LOGGER.error(
-            "Unable to unlock Table lock for table" + loadModel.getDatabaseName() + "." + loadModel
+            "Unable to unlock Table lock for table " + loadModel.getDatabaseName() + "." + loadModel
                 .getTableName() + " during table status updation");
       }
     }

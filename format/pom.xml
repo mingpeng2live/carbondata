@@ -57,7 +57,8 @@
             <phase>generate-sources</phase>
             <configuration>
               <generator>java</generator>
-              <outputDirectory>target/gen-java</outputDirectory>
+              <!--<outputDirectory>target/gen-java</outputDirectory>-->
+              <outputDirectory>src/main/java</outputDirectory>
               <compileOutput>true</compileOutput>
             </configuration>
             <goals>

@@ -75,30 +75,32 @@ public class CarbonDictionaryDecodeReadSupport<T> implements CarbonReadSupport<T
    * @param carbonColumns           column list
    * @param carbonTable table identifier
    */
-  @Override public void initialize(CarbonColumn[] carbonColumns,
-      CarbonTable carbonTable) throws IOException {
+  @Override
+  public void initialize(CarbonColumn[] carbonColumns,
+                         CarbonTable carbonTable) throws IOException {
     this.carbonColumns = carbonColumns;
     dictionaries = new Dictionary[carbonColumns.length];
     dataTypes = new DataType[carbonColumns.length];
     for (int i = 0; i < carbonColumns.length; i++) {
       if (carbonColumns[i].hasEncoding(Encoding.DICTIONARY) && !carbonColumns[i]
-          .hasEncoding(Encoding.DIRECT_DICTIONARY) && !carbonColumns[i].isComplex()) {
+              .hasEncoding(Encoding.DIRECT_DICTIONARY) && !carbonColumns[i].isComplex()) {
         CacheProvider cacheProvider = CacheProvider.getInstance();
         Cache<DictionaryColumnUniqueIdentifier, Dictionary> forwardDictionaryCache = cacheProvider
-            .createCache(CacheType.FORWARD_DICTIONARY);
+                .createCache(CacheType.FORWARD_DICTIONARY);
         dataTypes[i] = carbonColumns[i].getDataType();
         String dictionaryPath = carbonTable.getTableInfo().getFactTable().getTableProperties()
-            .get(CarbonCommonConstants.DICTIONARY_PATH);
+                .get(CarbonCommonConstants.DICTIONARY_PATH);
         dictionaries[i] = forwardDictionaryCache.get(
-            new DictionaryColumnUniqueIdentifier(carbonTable.getAbsoluteTableIdentifier(),
-                carbonColumns[i].getColumnIdentifier(), dataTypes[i], dictionaryPath));
+                new DictionaryColumnUniqueIdentifier(carbonTable.getAbsoluteTableIdentifier(),
+                        carbonColumns[i].getColumnIdentifier(), dataTypes[i], dictionaryPath));
       } else {
         dataTypes[i] = carbonColumns[i].getDataType();
       }
     }
   }
 
-  @Override public T readRow(Object[] data) {
+  @Override
+  public T readRow(Object[] data) {
     assert (data.length == dictionaries.length);
     writableArr = new Writable[data.length];
     for (int i = 0; i < dictionaries.length; i++) {
@@ -120,7 +122,8 @@ public class CarbonDictionaryDecodeReadSupport<T> implements CarbonReadSupport<T
    * column involved during decode, to facilitate LRU cache policy if memory
    * threshold is reached
    */
-  @Override public void close() {
+  @Override
+  public void close() {
     if (dictionaries == null) {
       return;
     }
@@ -143,6 +146,8 @@ public class CarbonDictionaryDecodeReadSupport<T> implements CarbonReadSupport<T
       return createStruct(obj, carbonColumn);
     } else if (DataTypes.isArrayType(dataType)) {
       return createArray(obj, carbonColumn);
+    } else if (DataTypes.isMapType(dataType)) {
+      return createMap(obj, carbonColumn);
     } else {
       return createWritablePrimitive(obj, carbonColumn);
     }
@@ -174,7 +179,7 @@ public class CarbonDictionaryDecodeReadSupport<T> implements CarbonReadSupport<T
     }
     if (array.size() > 0) {
       ArrayWritable subArray =
-          new ArrayWritable(Writable.class, (Writable[]) array.toArray(new Writable[array.size()]));
+              new ArrayWritable(Writable.class, (Writable[]) array.toArray(new Writable[array.size()]));
       return new ArrayWritable(Writable.class, new Writable[] { subArray });
     }
     return null;
@@ -189,6 +194,9 @@ public class CarbonDictionaryDecodeReadSupport<T> implements CarbonReadSupport<T
    * @throws IOException
    */
   private ArrayWritable createStruct(Object obj, CarbonColumn carbonColumn) throws IOException {
+    if (obj == null) {
+      return null;
+    }
     Object[] objArray = (Object[]) obj;
     List<CarbonDimension> childCarbonDimensions = null;
     if (carbonColumn.isDimension() && carbonColumn.getColumnSchema().getNumberOfChild() > 0) {
@@ -207,6 +215,51 @@ public class CarbonDictionaryDecodeReadSupport<T> implements CarbonReadSupport<T
   }
 
   /**
+   * Create the Map data for Map Datatype
+   *
+   * @param obj
+   * @param carbonColumn
+   * @return
+   * @throws IOException
+   */
+  private ArrayWritable createMap(Object obj, CarbonColumn carbonColumn) throws IOException {
+    if (obj == null) {
+      return null;
+    }
+    Object[] objArray = (Object[]) obj;
+    List<CarbonDimension> childCarbonDimensions = null;
+    CarbonDimension mapDimension = null;
+    List<ArrayWritable> writablesList = new ArrayList<>();
+    if (carbonColumn.isDimension() && carbonColumn.getColumnSchema().getNumberOfChild() > 0) {
+      childCarbonDimensions = ((CarbonDimension) carbonColumn).getListOfChildDimensions();
+      // get the map dimension wrapped inside the carbon dimension
+      mapDimension = childCarbonDimensions.get(0);
+      // get the child dimenesions of the map dimensions, child dimensions are - Key and Value
+      if (null != mapDimension) {
+        childCarbonDimensions = mapDimension.getListOfChildDimensions();
+      }
+    }
+    if (null != childCarbonDimensions && childCarbonDimensions.size() == 2) {
+      Object[] keyObjects = (Object[]) objArray[0];
+      Object[] valObjects = (Object[]) objArray[1];
+      for (int i = 0; i < keyObjects.length; i++) {
+        Writable keyWritable = createWritableObject(keyObjects[i], childCarbonDimensions.get(0));
+        Writable valWritable = createWritableObject(valObjects[i], childCarbonDimensions.get(1));
+        Writable[] arr = new Writable[2];
+        arr[0] = keyWritable;
+        arr[1] = valWritable;
+        writablesList.add(new ArrayWritable(Writable.class, arr));
+      }
+      if (writablesList.size() > 0) {
+        final ArrayWritable subArray = new ArrayWritable(ArrayWritable.class,
+                writablesList.toArray(new ArrayWritable[writablesList.size()]));
+        return new ArrayWritable(Writable.class, new Writable[]{subArray});
+      }
+    }
+    return null;
+  }
+
+  /**
    * This method will create the Writable Objects for primitives.
    *
    * @param obj
@@ -215,7 +268,7 @@ public class CarbonDictionaryDecodeReadSupport<T> implements CarbonReadSupport<T
    * @throws IOException
    */
   private Writable createWritablePrimitive(Object obj, CarbonColumn carbonColumn)
-      throws IOException {
+          throws IOException {
     DataType dataType = carbonColumn.getDataType();
     if (obj == null) {
       return null;
@@ -256,6 +309,8 @@ public class CarbonDictionaryDecodeReadSupport<T> implements CarbonReadSupport<T
       return createArray(obj, carbonColumn);
     } else if (DataTypes.isStructType(dataType)) {
       return createStruct(obj, carbonColumn);
+    } else if (DataTypes.isMapType(dataType)) {
+      return createMap(obj, carbonColumn);
     } else if (DataTypes.isDecimal(dataType)) {
       return new HiveDecimalWritable(HiveDecimal.create(new java.math.BigDecimal(obj.toString())));
     } else {

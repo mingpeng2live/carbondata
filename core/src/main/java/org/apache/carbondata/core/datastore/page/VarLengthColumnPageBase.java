@@ -17,8 +17,6 @@
 
 package org.apache.carbondata.core.datastore.page;
 
-import java.io.IOException;
-
 import org.apache.carbondata.core.constants.CarbonCommonConstants;
 import org.apache.carbondata.core.constants.CarbonV3DataFormatConstants;
 import org.apache.carbondata.core.datastore.ColumnType;
@@ -33,6 +31,8 @@ import org.apache.carbondata.core.metadata.datatype.DataTypes;
 import org.apache.carbondata.core.metadata.datatype.DecimalConverterFactory;
 import org.apache.carbondata.core.util.ByteUtil;
 import org.apache.carbondata.core.util.ThreadLocalTaskInfo;
+
+import java.io.IOException;
 
 public abstract class VarLengthColumnPageBase extends ColumnPage {
 
@@ -467,7 +467,14 @@ public abstract class VarLengthColumnPageBase extends ColumnPage {
   @Override public byte[] getComplexChildrenLVFlattenedBytePage() throws IOException {
     // output LV encoded byte array
     int offset = 0;
-    byte[] data = new byte[totalLength + ((rowOffset.getActualRowCount() - 1) * 2)];
+//     -- add
+    int byteLength = totalLength + ((rowOffset.getActualRowCount() - 1) * 2);
+    if (byteLength<0) {
+//      LOGGER.info("totalLength: " + totalLength + " actRowCount: " + rowOffset.getActualRowCount() + " byteLength: " + byteLength + " rowOffset: " + rowOffset.toString());
+      byteLength = 0;
+    }
+
+    byte[] data = new byte[byteLength];
     for (int rowId = 0; rowId < rowOffset.getActualRowCount() - 1; rowId++) {
       short length = (short) (rowOffset.getInt(rowId + 1) - rowOffset.getInt(rowId));
       ByteUtil.setShort(data, offset, length);

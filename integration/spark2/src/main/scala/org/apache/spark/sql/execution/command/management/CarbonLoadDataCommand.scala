@@ -341,7 +341,7 @@ case class CarbonLoadDataCommand(
       }
       val partitionStatus = SegmentStatus.SUCCESS
       val columnar = sparkSession.conf.get("carbon.is.columnar.storage", "true").toBoolean
-      LOGGER.info("Sort Scope : " + carbonLoadModel.getSortScope)
+      LOGGER.info("Sort Scope : " + carbonLoadModel.getSortScope + " usingOnePass: " + carbonLoadModel.getUseOnePass + " columnar: " + columnar)
       if (carbonLoadModel.getUseOnePass) {
         loadDataUsingOnePass(
           sparkSession,
@@ -616,6 +616,9 @@ case class CarbonLoadDataCommand(
       carbonLoadModel,
       hadoopConf,
       dictionaryDataFrame)
+
+    LOGGER.info("isHivePartitionTable: " + table.isHivePartitionTable)
+
     if (table.isHivePartitionTable) {
       rows = loadDataWithPartition(
         sparkSession,
@@ -680,6 +683,9 @@ case class CarbonLoadDataCommand(
 
     var partitionsLen = 0
     val sortScope = CarbonDataProcessorUtil.getSortScope(carbonLoadModel.getSortScope)
+
+    LOGGER.info("partition: " + partition.nonEmpty + " partition size: " + partition.size)
+
     val partitionValues = if (partition.nonEmpty) {
       partition.filter(_._2.nonEmpty).map { case (col, value) =>
         catalogTable.schema.find(_.name.equalsIgnoreCase(col)) match {
@@ -701,6 +707,9 @@ case class CarbonLoadDataCommand(
     }
     var persistedRDD: Option[RDD[InternalRow]] = None
     try {
+
+      LOGGER.info("dataFrame: " + dataFrame.isDefined + " updateModel: " + updateModel.isDefined)
+
       val query: LogicalPlan = if (dataFrame.isDefined) {
         val (rdd, dfAttributes) = if (updateModel.isDefined) {
           // Get the updated query plan in case of update scenario
@@ -983,6 +992,9 @@ case class CarbonLoadDataCommand(
     }
   }
 
+
+
+
   /**
    * Convert the rdd as per steps of data loading inputprocessor step and converter step
    * @param originRDD
@@ -1033,14 +1045,14 @@ case class CarbonLoadDataCommand(
       .broadCastHadoopConf(sparkSession.sparkContext, sparkSession.sessionState.newHadoopConf())
     val finalRDD = convertRDD.mapPartitionsWithIndex { case(index, rows) =>
         DataTypeUtil.setDataTypeConverter(new SparkDataTypeConverterImpl)
-      ThreadLocalSessionInfo.setConfigurationToCurrentThread(conf.value.value)
+        ThreadLocalSessionInfo.setConfigurationToCurrentThread(conf.value.value)
         DataLoadProcessorStepOnSpark.inputAndconvertFunc(
-          rows,
-          index,
-          modelBroadcast,
-          partialSuccessAccum,
-          inputStepRowCounter,
-          keepActualData = true)
+            rows,
+            index,
+            modelBroadcast,
+            partialSuccessAccum,
+            inputStepRowCounter,
+            keepActualData = true)
       }.filter(_ != null).map(row => InternalRow.fromSeq(row.getData))
 
     finalRDD

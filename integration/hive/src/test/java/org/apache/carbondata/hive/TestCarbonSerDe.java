@@ -28,6 +28,7 @@ import org.apache.hadoop.hive.serde2.io.ShortWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.StructObjectInspector;
 import org.apache.hadoop.io.*;
 
+import org.apache.hadoop.util.StringUtils;
 import org.apache.log4j.Logger;
 
 import org.junit.Assert;
@@ -134,4 +135,5 @@ public class TestCarbonSerDe {
         }
         return true;
     }
+
 }

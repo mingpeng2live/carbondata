@@ -16,23 +16,18 @@
  */
 package org.apache.carbondata.hive;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.SettableStructObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.StructField;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorFactory;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.WritableHiveVarcharObjectInspector;
-import org.apache.hadoop.hive.serde2.typeinfo.DecimalTypeInfo;
-import org.apache.hadoop.hive.serde2.typeinfo.ListTypeInfo;
-import org.apache.hadoop.hive.serde2.typeinfo.StructTypeInfo;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
-import org.apache.hadoop.hive.serde2.typeinfo.VarcharTypeInfo;
+import org.apache.hadoop.hive.serde2.typeinfo.*;
 import org.apache.hadoop.io.ArrayWritable;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
 
 class CarbonObjectInspector extends SettableStructObjectInspector {
   private final TypeInfo typeInfo;
@@ -74,6 +69,11 @@ class CarbonObjectInspector extends SettableStructObjectInspector {
     } else if (typeInfo.getCategory().equals(Category.LIST)) {
       final TypeInfo subTypeInfo = ((ListTypeInfo) typeInfo).getListElementTypeInfo();
       return new CarbonArrayInspector(getObjectInspector(subTypeInfo));
+    } else if (typeInfo.getCategory().equals(Category.MAP)) {
+      MapTypeInfo mapTypeInfo = (MapTypeInfo) typeInfo;
+      final TypeInfo subKeyTypeInfo = mapTypeInfo.getMapKeyTypeInfo();
+      final TypeInfo subValTypeInfo = mapTypeInfo.getMapValueTypeInfo();
+      return  new CarbonMapInspector(getObjectInspector(subKeyTypeInfo), getObjectInspector(subValTypeInfo));
     } else if (typeInfo.equals(TypeInfoFactory.shortTypeInfo)) {
       return PrimitiveObjectInspectorFactory.writableShortObjectInspector;
     } else if (typeInfo.equals(TypeInfoFactory.timestampTypeInfo)) {

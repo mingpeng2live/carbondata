@@ -62,6 +62,8 @@ public class HiveEmbeddedServer2 {
       config.setIntVar(ConfVars.HIVE_SERVER2_THRIFT_PORT, port);
       config.setBoolVar(ConfVars.HADOOPMAPREDINPUTDIRRECURSIVE, true);
       config.setBoolVar(ConfVars.HIVE_HADOOP_SUPPORTS_SUBDIRECTORIES, true);
+//      config.setBoolean("hive.mapred.supports.subdirectories", true);
+//      config.setBoolean("mapreduce.input.fileinputformat.input.dir.recursive", true);
       hiveServer.init(config);
       hiveServer.start();
       waitForStartup();

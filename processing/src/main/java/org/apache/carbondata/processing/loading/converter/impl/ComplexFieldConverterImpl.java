@@ -17,14 +17,14 @@
 
 package org.apache.carbondata.processing.loading.converter.impl;
 
-import java.io.ByteArrayOutputStream;
-import java.io.DataOutputStream;
-import java.util.List;
-
 import org.apache.carbondata.core.datastore.row.CarbonRow;
 import org.apache.carbondata.processing.datatypes.GenericDataType;
 import org.apache.carbondata.processing.loading.converter.BadRecordLogHolder;
 import org.apache.carbondata.processing.loading.exception.CarbonDataLoadingException;
+
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
+import java.util.List;
 
 public class ComplexFieldConverterImpl extends AbstractDictionaryFieldConverterImpl {
 

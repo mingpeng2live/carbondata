@@ -121,7 +121,7 @@ public class DictionaryFieldConverterImpl extends AbstractDictionaryFieldConvert
                 .prepareFailureReason(carbonDimension.getColName(), carbonDimension.getDataType());
             logHolder.getColumnMessageMap().put(carbonDimension.getColName(), message);
           }
-          logHolder.setReason(message);
+//          logHolder.setReason(message);
         }
         return CarbonCommonConstants.MEMBER_DEFAULT_VAL_SURROGATE_KEY;
       } else {

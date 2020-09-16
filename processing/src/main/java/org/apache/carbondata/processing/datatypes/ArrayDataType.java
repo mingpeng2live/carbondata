@@ -17,12 +17,6 @@
 
 package org.apache.carbondata.processing.datatypes;
 
-import java.io.DataOutputStream;
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.List;
-
 import org.apache.carbondata.core.datastore.ColumnType;
 import org.apache.carbondata.core.datastore.row.ComplexColumnInfo;
 import org.apache.carbondata.core.devapi.DictionaryGenerationException;
@@ -31,6 +25,12 @@ import org.apache.carbondata.core.keygenerator.KeyGenerator;
 import org.apache.carbondata.core.util.DataTypeUtil;
 import org.apache.carbondata.processing.loading.complexobjects.ArrayObject;
 import org.apache.carbondata.processing.loading.converter.BadRecordLogHolder;
+
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Array DataType stateless object used in data loading
@@ -182,13 +182,14 @@ public class ArrayDataType implements GenericDataType<ArrayObject> {
   @Override public void writeByteArray(ArrayObject input, DataOutputStream dataOutputStream,
       BadRecordLogHolder logHolder) throws IOException, DictionaryGenerationException {
     if (input == null) {
-      dataOutputStream.writeInt(1);
-      children.writeByteArray(null, dataOutputStream, logHolder);
+      dataOutputStream.writeInt(-1);
+//      dataOutputStream.writeInt(1);
+//      children.writeByteArray(null, dataOutputStream, logHolder);
     } else {
       Object[] data = input.getData();
       dataOutputStream.writeInt(data.length);
       for (Object eachInput : data) {
-        children.writeByteArray(eachInput, dataOutputStream, logHolder);
+          children.writeByteArray(eachInput, dataOutputStream, logHolder);
       }
     }
   }
@@ -206,15 +207,16 @@ public class ArrayDataType implements GenericDataType<ArrayObject> {
       KeyGenerator[] generator)
       throws IOException, KeyGenException {
     int dataLength = byteArrayInput.getInt();
-
     dataOutputStream.writeInt(dataLength);
-    if (children instanceof PrimitiveDataType) {
-      if (children.getIsColumnDictionary()) {
-        dataOutputStream.writeInt(generator[children.getSurrogateIndex()].getKeySizeInBytes());
+    if (dataLength != -1) {
+      if (children instanceof PrimitiveDataType) {
+        if (children.getIsColumnDictionary()) {
+          dataOutputStream.writeInt(generator[children.getSurrogateIndex()].getKeySizeInBytes());
+        }
       }
-    }
-    for (int i = 0; i < dataLength; i++) {
-      children.parseComplexValue(byteArrayInput, dataOutputStream, generator);
+      for (int i = 0; i < dataLength; i++) {
+        children.parseComplexValue(byteArrayInput, dataOutputStream, generator);
+      }
     }
   }
 

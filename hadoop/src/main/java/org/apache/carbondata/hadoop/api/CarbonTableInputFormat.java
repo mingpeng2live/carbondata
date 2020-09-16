@@ -67,6 +67,7 @@ import org.apache.hadoop.mapreduce.InputSplit;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.JobContext;
 import org.apache.hadoop.mapreduce.lib.input.FileSplit;
+import org.apache.hadoop.util.StringUtils;
 import org.apache.log4j.Logger;
 
 /**
@@ -176,13 +177,13 @@ public class CarbonTableInputFormat<T> extends CarbonInputFormat<T> {
     Expression filter = getFilterPredicates(job.getConfiguration());
     // this will be null in case of corrupt schema file.
     PartitionInfo partitionInfo = carbonTable.getPartitionInfo(carbonTable.getTableName());
-
     // prune partitions for filter query on partition table
     BitSet matchedPartitions = null;
     if (partitionInfo != null && partitionInfo.getPartitionType() != PartitionType.NATIVE_HIVE) {
       carbonTable.processFilterExpression(filter, null, null);
       matchedPartitions = setMatchedPartitions(null, filter, partitionInfo, null);
       if (matchedPartitions != null) {
+        LOG.info("matchedPartitions: " + matchedPartitions.cardinality());
         if (matchedPartitions.cardinality() == 0) {
           return new ArrayList<InputSplit>();
         } else if (matchedPartitions.cardinality() == partitionInfo.getNumPartitions()) {
@@ -200,7 +201,23 @@ public class CarbonTableInputFormat<T> extends CarbonInputFormat<T> {
     if (!splitsOfStreaming.isEmpty()) {
       splits.addAll(splitsOfStreaming);
     }
-    return splits;
+
+    // filter not exists input dir
+    List<InputSplit> splitRes = new ArrayList<>();
+    String dirs = job.getConfiguration().get(INPUT_DIR);
+//    String[] inputPaths = StringUtils.split(dirs);  // 如果父路径判断存在问题，需要此变量循环判断
+    for (InputSplit split : splits) {
+      CarbonInputSplit carbonInputSplit = (CarbonInputSplit) split;
+      Path path = carbonInputSplit.getPath();
+      if (dirs.contains(path.getParent().toString())) {
+        LOG.info("path: " + path);
+        splitRes.add(split);
+      }
+    }
+    if (splitRes.isEmpty()) {
+      splitRes = splits;
+    }
+    return splitRes;
   }
 
   /**

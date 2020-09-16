@@ -1124,11 +1124,16 @@ object CarbonDataRDDFactory {
       val nodeNumOfData = rdd.partitions.flatMap[String, Array[String]] { p =>
         DataLoadPartitionCoalescer.getPreferredLocs(rdd, p).map(_.host)
       }.distinct.length
+
+      LOGGER.info("new nodeNumOfData: " + nodeNumOfData)
+
       val nodes = DistributionUtil.ensureExecutorsByNumberAndGetNodeList(
         nodeNumOfData,
         sqlContext.sparkContext)
-      val newRdd = new DataLoadCoalescedRDD[Row](sqlContext.sparkSession, rdd, nodes.toArray
-        .distinct)
+
+      LOGGER.info("new nodes: " + nodes.length)
+
+      val newRdd = new DataLoadCoalescedRDD[Row](sqlContext.sparkSession, rdd, nodes.toArray)
 
       new NewDataFrameLoaderRDD(
         sqlContext.sparkSession,

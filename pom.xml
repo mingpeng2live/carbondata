@@ -139,6 +139,16 @@
         <enabled>true</enabled>
       </releases>
     </repository>
+    <repository>
+       <id>cloudera</id>
+       <name>cloudera Repository</name>
+       <url>https://repository.cloudera.com/artifactory/cloudera-repos</url>
+    </repository>
+    <repository>
+      <id>nexus</id>
+      <name>bdh Repository</name>
+      <url>https://maven.apps.n1q.com/repository/maven-public/</url>
+    </repository>
   </repositories>
 
   <dependencyManagement>

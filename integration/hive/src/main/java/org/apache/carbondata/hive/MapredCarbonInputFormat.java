@@ -106,6 +106,10 @@ public class MapredCarbonInputFormat extends CarbonTableInputFormat<ArrayWritabl
     jobConf.set(DATABASE_NAME, "_dummyDb_" + UUID.randomUUID().toString());
     jobConf.set(TABLE_NAME, "_dummyTable_" + UUID.randomUUID().toString());
     org.apache.hadoop.mapreduce.JobContext jobContext = Job.getInstance(jobConf);
+
+    String dirs = jobContext.getConfiguration().get(INPUT_DIR);
+    LOGGER.info("input dir: " + dirs);
+
     CarbonTableInputFormat carbonTableInputFormat = new CarbonTableInputFormat();
     List<org.apache.hadoop.mapreduce.InputSplit> splitList =
         carbonTableInputFormat.getSplits(jobContext);
@@ -128,7 +132,9 @@ public class MapredCarbonInputFormat extends CarbonTableInputFormat<ArrayWritabl
     String path = null;
     if (inputSplit instanceof CarbonHiveInputSplit) {
       path = ((CarbonHiveInputSplit) inputSplit).getPath().toString();
+      LOGGER.info("path: "  + path);
     }
+
     QueryModel queryModel = null;
     try {
       jobConf.set(DATABASE_NAME, "_dummyDb_" + UUID.randomUUID().toString());

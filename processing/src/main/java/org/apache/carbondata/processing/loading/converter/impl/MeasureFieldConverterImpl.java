@@ -73,9 +73,9 @@ public class MeasureFieldConverterImpl implements FieldConverter {
             dataField.getColumn().getDataType());
         logHolder.getColumnMessageMap().put(dataField.getColumn().getColName(), message);
       }
-      if (dataField.getColumn().isDimension()) {
-        logHolder.setReason(message);
-      }
+//      if (dataField.getColumn().isDimension()) {
+//        logHolder.setReason(message);
+//      }
       return null;
     } else if (literalValue.length() == 0) {
       if (isEmptyBadRecord) {
@@ -85,7 +85,7 @@ public class MeasureFieldConverterImpl implements FieldConverter {
               dataField.getColumn().getDataType());
           logHolder.getColumnMessageMap().put(dataField.getColumn().getColName(), message);
         }
-        logHolder.setReason(message);
+//        logHolder.setReason(message);
       }
       return null;
     } else if (literalValue.equals(nullFormat)) {

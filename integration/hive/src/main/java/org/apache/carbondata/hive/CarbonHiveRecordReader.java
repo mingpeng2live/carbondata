@@ -22,6 +22,7 @@ import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.carbondata.core.datastore.block.TableBlockInfo;
 import org.apache.carbondata.core.scan.executor.exception.QueryExecutionException;
@@ -39,20 +40,10 @@ import org.apache.hadoop.hive.serde2.io.DoubleWritable;
 import org.apache.hadoop.hive.serde2.io.HiveDecimalWritable;
 import org.apache.hadoop.hive.serde2.io.ShortWritable;
 import org.apache.hadoop.hive.serde2.io.TimestampWritable;
-import org.apache.hadoop.hive.serde2.objectinspector.ListObjectInspector;
-import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
-import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
-import org.apache.hadoop.hive.serde2.objectinspector.StructField;
-import org.apache.hadoop.hive.serde2.objectinspector.StructObjectInspector;
+import org.apache.hadoop.hive.serde2.objectinspector.*;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
-import org.apache.hadoop.io.ArrayWritable;
-import org.apache.hadoop.io.BooleanWritable;
-import org.apache.hadoop.io.BytesWritable;
-import org.apache.hadoop.io.IntWritable;
-import org.apache.hadoop.io.LongWritable;
-import org.apache.hadoop.io.Text;
-import org.apache.hadoop.io.Writable;
+import org.apache.hadoop.io.*;
 import org.apache.hadoop.mapred.InputSplit;
 import org.apache.hadoop.mapred.JobConf;
 
@@ -190,6 +181,24 @@ class CarbonHiveRecordReader extends CarbonRecordReader<ArrayWritable>
     return null;
   }
 
+  private MapWritable createMap(Object obj, MapObjectInspector inspector) throws SerDeException {
+    Map<?, ?> sourceMap = inspector.getMap(obj);
+    MapWritable mapWritable = new MapWritable();
+    if (sourceMap != null && !sourceMap.isEmpty()) {
+      ObjectInspector koi = inspector.getMapKeyObjectInspector();
+      ObjectInspector voi = inspector.getMapValueObjectInspector();
+      for (Map.Entry<?, ?> itm : sourceMap.entrySet()) {
+        Object keyObj = itm.getKey();
+        Object valObj = itm.getValue();
+        Writable newKeyObj = createObject(keyObj, koi);
+        Writable newValObj = createObject(valObj, voi);
+        mapWritable.put(newKeyObj, newValObj);
+      }
+      return mapWritable;
+    }
+    return null;
+  }
+
   private Writable createPrimitive(Object obj, PrimitiveObjectInspector inspector)
       throws SerDeException {
     if (obj == null) {
@@ -235,6 +244,8 @@ class CarbonHiveRecordReader extends CarbonRecordReader<ArrayWritable>
         return createArray(obj, (ListObjectInspector) inspector);
       case PRIMITIVE:
         return createPrimitive(obj, (PrimitiveObjectInspector) inspector);
+      case MAP:
+        return createMap(obj, (MapObjectInspector) inspector);
     }
     throw new SerDeException("Unknown data type" + inspector.getCategory());
   }

@@ -345,7 +345,7 @@ public class SegmentFileStore {
             CarbonCommonConstants.MAX_TIMEOUT_FOR_CONCURRENT_LOCK_DEFAULT);
     try {
       if (carbonLock.lockWithRetries(retryCount, maxTimeout)) {
-        LOGGER.info("Acquired lock for tablepath" + tablePath + " for table status updation");
+        LOGGER.info("Acquired lock for tablepath " + tablePath + " for table status updation");
         LoadMetadataDetails[] listOfLoadFolderDetailsArray =
             SegmentStatusManager.readLoadMetadata(metadataPath);
 
@@ -371,10 +371,10 @@ public class SegmentFileStore {
       ;
     } finally {
       if (carbonLock.unlock()) {
-        LOGGER.info("Table unlocked successfully after table status updation" + tablePath);
+        LOGGER.info("Table unlocked successfully after table status updation " + tablePath);
       } else {
         LOGGER.error(
-            "Unable to unlock Table lock for table" + tablePath + " during table status updation");
+            "Unable to unlock Table lock for table " + tablePath + " during table status updation");
       }
     }
     return status;

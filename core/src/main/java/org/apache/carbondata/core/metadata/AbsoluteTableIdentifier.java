@@ -18,8 +18,10 @@ package org.apache.carbondata.core.metadata;
 
 import java.io.Serializable;
 
+import org.apache.carbondata.common.logging.LogServiceFactory;
 import org.apache.carbondata.core.constants.CarbonCommonConstants;
 import org.apache.carbondata.core.datastore.impl.FileFactory;
+import org.apache.log4j.Logger;
 
 /**
  * identifier which will have store path and carbon table identifier
@@ -41,7 +43,8 @@ public class AbsoluteTableIdentifier implements Serializable {
    */
   private String dictionaryPath;
 
-
+  private static final Logger LOG =
+          LogServiceFactory.getLogService(AbsoluteTableIdentifier.class.getName());
   /**
    * carbon table identifier which will have table name and table database
    * name
@@ -50,6 +53,12 @@ public class AbsoluteTableIdentifier implements Serializable {
 
   private AbsoluteTableIdentifier(String tablePath, CarbonTableIdentifier carbonTableIdentifier) {
     //TODO this should be moved to common place where path handling will be handled
+    LOG.info("tablePath: " + tablePath);
+    if (tablePath.contains("=")) {
+      tablePath = tablePath.substring(0, tablePath.indexOf("="));
+      tablePath = tablePath.substring(0, tablePath.lastIndexOf("/"));
+      LOG.info("tablePath update: " + tablePath);
+    }
     this.tablePath = FileFactory.getUpdatedFilePath(tablePath);
     this.carbonTableIdentifier = carbonTableIdentifier;
   }

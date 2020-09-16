@@ -68,7 +68,7 @@ public class BinaryFieldConverterImpl implements FieldConverter {
       return value;
     } else {
       throw new CarbonDataLoadingException("Binary only support String and byte[] data type," +
-          " binary decoder only support Base64, Hex or no decode for string");
+          " binary decoder only support Base64, Hex or no decode for string, column: " + dimension.getColName());
     }
   }
 

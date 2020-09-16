@@ -371,6 +371,7 @@ m filterExpression
       throws IOException {
     String tablePath = configuration.get(INPUT_DIR, "");
     try {
+      LOG.info("tablePath: " + tablePath);
       return AbsoluteTableIdentifier
           .from(tablePath, getDatabaseName(configuration), getTableName(configuration));
     } catch (InvalidConfigurationException e) {

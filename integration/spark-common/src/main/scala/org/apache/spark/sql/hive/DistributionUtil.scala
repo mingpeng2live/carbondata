@@ -154,6 +154,67 @@ object DistributionUtil {
     getDistinctNodesList(sparkContext, requiredExecutors)
   }
 
+  /** -------------------- add start-------------- */
+
+  /** nodes list */
+  def ensureExecutorsNodeList(nodesOfData: Int,
+                                            sparkContext: SparkContext): Array[String] = {
+    val confExecutors: Int = getConfiguredExecutors(sparkContext)
+    LOGGER.info(s"Executors configured : $confExecutors")
+    val requiredExecutors = if (nodesOfData < 1 || nodesOfData > confExecutors) {
+      confExecutors
+    } else {
+      nodesOfData
+    }
+    // request for starting the number of required executors
+    ensureExecutors(sparkContext, requiredExecutors)
+    getNodesList(sparkContext, requiredExecutors)
+  }
+
+
+  /**
+    * This method will return the nodes list
+    *
+    * @param sparkContext
+    * @param requiredExecutors
+    * @return
+    */
+  private def getNodesList(sparkContext: SparkContext,
+                                   requiredExecutors: Int): Array[String] = {
+    val startTime = System.currentTimeMillis()
+    var nodes = DistributionUtil.getNodeList(sparkContext)
+    LOGGER.info("nodeLength: " + nodes.length + " requiredExecutors: " + requiredExecutors)
+    // calculate the number of times loop has to run to check for starting
+    // the requested number of executors
+    val threadSleepTime =
+    CarbonCommonConstants.CARBON_DYNAMIC_ALLOCATION_SCHEDULER_THREAD_SLEEP_TIME
+    val maxRetryCount = calculateMaxRetry
+    var maxTimes = maxRetryCount
+    breakable {
+      while (nodes.length < requiredExecutors && maxTimes > 0) {
+        Thread.sleep(threadSleepTime);
+        nodes = DistributionUtil.getNodeList(sparkContext)
+        maxTimes = maxTimes - 1;
+        val resourceRatio = (nodes.length.toDouble / requiredExecutors)
+        if (resourceRatio.compareTo(minRegisteredResourceRatio) >= 0) {
+          break
+        }
+      }
+    }
+
+    val ratioLength = (nodes.length * minRegisteredResourceRatio).intValue()
+    val nodeList = new Array[String](ratioLength)
+    nodes.copyToArray(nodeList)
+
+    val timDiff = System.currentTimeMillis() - startTime
+    LOGGER.info(s"Total Time taken to ensure the required executors : $timDiff nodeLength: ${nodes.length} ratio: $minRegisteredResourceRatio ratioLength: $ratioLength")
+    LOGGER.info(s"Time elapsed to allocate the required executors: " +
+      s"${(maxRetryCount - maxTimes) * threadSleepTime}")
+    nodeList
+  }
+
+  /** --------------------add end-------------- */
+
   /**
    * This method will ensure that the required/configured number of executors are requested
    * for processing the identified blocks
@@ -231,6 +292,7 @@ object DistributionUtil {
       requiredExecutors: Int): Seq[String] = {
     val startTime = System.currentTimeMillis()
     var nodes = DistributionUtil.getNodeList(sparkContext)
+    LOGGER.info("nodeLength: " + nodes.length + " requiredExecutors: " + requiredExecutors)
     // calculate the number of times loop has to run to check for starting
     // the requested number of executors
     val threadSleepTime =
@@ -249,7 +311,7 @@ object DistributionUtil {
       }
     }
     val timDiff = System.currentTimeMillis() - startTime
-    LOGGER.info(s"Total Time taken to ensure the required executors : $timDiff")
+    LOGGER.info(s"Total Time taken to ensure the required executors : $timDiff nodeLength: ${nodes.length}")
     LOGGER.info(s"Time elapsed to allocate the required executors: " +
       s"${(maxRetryCount - maxTimes) * threadSleepTime}")
     nodes.distinct.toSeq

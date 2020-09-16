@@ -171,7 +171,7 @@ public class RowConverterImpl implements RowConverter {
         if (badRecordLogger.isDataLoadFail()) {
           String error = "Data load failed due to bad record: " + logHolder.getReason();
           if (!badRecordLogger.isBadRecordLoggerEnable()) {
-            error += "Please enable bad record logger to know the detail reason.";
+            error += " Please enable bad record logger to know the detail reason.";
           }
           throw new BadRecordFoundException(error);
         }
