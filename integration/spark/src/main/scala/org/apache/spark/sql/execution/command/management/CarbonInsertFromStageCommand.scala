@@ -17,12 +17,13 @@
 
 package org.apache.spark.sql.execution.command.management
 
-import java.io.{File, InputStreamReader, IOException}
+import java.io.{DataInputStream, File, InputStreamReader, IOException}
 import java.util
 import java.util.Collections
-import java.util.concurrent.{Callable, Executors, ExecutorService}
+import java.util.concurrent.{Callable, Executors, ExecutorService, TimeUnit}
 
 import scala.collection.JavaConverters._
+import scala.util.control.Breaks.{break, breakable}
 
 import com.google.gson.Gson
 import org.apache.hadoop.conf.Configuration
@@ -163,6 +164,7 @@ case class CarbonInsertFromStageCommand(
     } catch {
       case ex: Throwable =>
         LOGGER.error(s"failed to insert ${table.getDatabaseName}.${table.getTableName}", ex)
+        shutdownExecutorService(executorService)
         throw ex
     } finally {
       lock.unlock()
@@ -171,7 +173,7 @@ case class CarbonInsertFromStageCommand(
     try{
       // 2) read all stage files to collect input files for data loading
       // create a thread pool to read them
-      val stageInputs = collectStageInputs(executorService, stageFiles)
+      val stageInputs = collectStageInputs(executorService, stagePath, stageFiles)
 
       // 3) perform data loading
       if (table.isHivePartitionTable) {
@@ -189,6 +191,8 @@ case class CarbonInsertFromStageCommand(
       case ex: Throwable =>
         LOGGER.error(s"failed to insert ${table.getDatabaseName}.${table.getTableName}", ex)
         throw ex
+    } finally {
+      shutdownExecutorService(executorService)
     }
     Seq.empty
   }
@@ -226,6 +230,7 @@ case class CarbonInsertFromStageCommand(
       throw new RuntimeException(s"Failed to lock table status for " +
         s"${table.getDatabaseName}.${table.getTableName}")
     }
+    var executorService: ExecutorService = null
     try {
       val segments = SegmentStatusManager.readTableStatusFile(
         CarbonTablePath.getTableStatusFilePath(table.getTablePath)
@@ -242,7 +247,7 @@ case class CarbonInsertFromStageCommand(
           LOGGER.info(s"Segment $segmentId is in SUCCESS state, about to delete " +
             s"${stageFileNames.length} stage files")
           val numThreads = Math.min(Math.max(stageFileNames.length, 1), 10)
-          val executorService = Executors.newFixedThreadPool(numThreads)
+          executorService = Executors.newFixedThreadPool(numThreads)
           stageFileNames.map { fileName =>
             executorService.submit(new Runnable {
               override def run(): Unit = {
@@ -268,6 +273,7 @@ case class CarbonInsertFromStageCommand(
       if (lock != null) {
         lock.unlock()
       }
+      shutdownExecutorService(executorService)
     }
     LOGGER.info(s"Finish recovery, delete snapshot file: $snapshotFilePath")
     FileFactory.getCarbonFile(snapshotFilePath).delete()
@@ -469,6 +475,7 @@ case class CarbonInsertFromStageCommand(
    */
   private def collectStageInputs(
       executorService: ExecutorService,
+      tableStagePath: String,
       stageFiles: Array[(CarbonFile, CarbonFile)]
   ): Seq[StageInput] = {
     val startTime = System.currentTimeMillis()
@@ -477,13 +484,34 @@ case class CarbonInsertFromStageCommand(
     stageFiles.map { stage =>
       executorService.submit(new Runnable {
         override def run(): Unit = {
-          val filePath = stage._1.getAbsolutePath
-          val stream = FileFactory.getDataInputStream(filePath)
+          val filePath = tableStagePath + CarbonCommonConstants.FILE_SEPARATOR + stage._1.getName
+          var stream: DataInputStream = null
           try {
-            val stageInput = gson.fromJson(new InputStreamReader(stream), classOf[StageInput])
-            output.add(stageInput)
+            stream = FileFactory.getDataInputStream(filePath)
+            var retry = CarbonInsertFromStageCommand.DELETE_FILES_RETRY_TIMES
+            breakable (
+              while (retry > 0) {
+                try {
+                  val stageInput = gson.fromJson(new InputStreamReader(stream), classOf[StageInput])
+                  output.add(stageInput)
+                  break()
+                } catch {
+                  case ex: Exception => retry -= 1
+                    if (retry > 0) {
+                      LOGGER.warn(s"The stage file $filePath can't be read, retry " +
+                        s"$retry times: ${ex.getMessage}")
+                      Thread.sleep(CarbonInsertFromStageCommand.DELETE_FILES_RETRY_INTERVAL)
+                    } else {
+                      LOGGER.error(s"The stage file $filePath can't be read: ${ex.getMessage}")
+                      throw ex
+                    }
+                }
+              }
+            )
           } finally {
-            stream.close()
+            if (stream != null) {
+              stream.close()
+            }
           }
         }
       })
@@ -738,12 +766,20 @@ case class CarbonInsertFromStageCommand(
     }
   }
 
+  private def shutdownExecutorService(executorService: ExecutorService): Unit = {
+    if (executorService != null && !executorService.isShutdown) {
+      executorService.shutdownNow()
+    }
+  }
+
   override protected def opName: String = "INSERT STAGE"
 }
 
 object CarbonInsertFromStageCommand {
 
   val DELETE_FILES_RETRY_TIMES = 3
+
+  val DELETE_FILES_RETRY_INTERVAL = 1000
 
   val BATCH_FILE_COUNT_KEY = "batch_file_count"
 

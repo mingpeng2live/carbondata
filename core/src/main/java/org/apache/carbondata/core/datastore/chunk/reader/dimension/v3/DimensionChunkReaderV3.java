@@ -253,10 +253,17 @@ public class DimensionChunkReaderV3 extends AbstractDimensionChunkReader {
     ColumnPageDecoder decoder = encodingFactory.createDecoder(encodings, encoderMetas,
         compressorName, vectorInfo != null);
     if (vectorInfo != null) {
+      // set encodings of current page in the vectorInfo, used for decoding the complex child page
+      vectorInfo.encodings = encodings;
       decoder
           .decodeAndFillVector(pageData.array(), offset, pageMetadata.data_page_length, vectorInfo,
               nullBitSet, isLocalDictEncodedPage, pageMetadata.numberOfRowsInpage,
               reusableDataBuffer);
+      if (vectorInfo.vector.getType().isComplexType() && !vectorInfo.vectorStack.isEmpty()) {
+        // For complex type, always top of the vector stack is processed in decodeAndFillVector.
+        // so, pop() the top vector as its processing is finished.
+        vectorInfo.vectorStack.pop();
+      }
       return null;
     } else {
       return decoder

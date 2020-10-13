@@ -17,6 +17,9 @@
 
 package org.apache.carbondata.spark.testsuite.longstring
 
+import scala.collection.JavaConverters._
+import scala.collection.mutable
+
 import java.io.{File, PrintWriter}
 
 import org.apache.commons.lang3.RandomStringUtils
@@ -29,8 +32,11 @@ import org.apache.carbondata.common.exceptions.sql.MalformedCarbonCommandExcepti
 import org.apache.carbondata.core.constants.CarbonCommonConstants
 import org.apache.carbondata.core.metadata.CarbonMetadata
 import org.apache.carbondata.core.metadata.datatype.DataTypes
+import org.apache.carbondata.core.statusmanager.SegmentStatusManager
 import org.apache.carbondata.core.util.CarbonProperties
+
 import scala.collection.mutable
+import scala.collection.JavaConverters._
 
 class VarcharDataTypesBasicTestCase extends QueryTest with BeforeAndAfterEach with BeforeAndAfterAll {
   private val longStringTable = "long_string_table"
@@ -108,6 +114,57 @@ class VarcharDataTypesBasicTestCase extends QueryTest with BeforeAndAfterEach wi
     }
     assert(exceptionCaught.getMessage.contains("long_string_columns: id"))
     assert(exceptionCaught.getMessage.contains("its data type is not string"))
+  }
+
+  test("cannot alter sort_columns dataType to long_string_columns") {
+    val exceptionCaught = intercept[RuntimeException] {
+      sql(
+        s"""
+           | CREATE TABLE if not exists $longStringTable(
+           | id INT, NAME STRING, description STRING, address STRING, note STRING
+           | ) STORED AS carbondata
+           | TBLPROPERTIES('SORT_COLUMNS'='name, address')
+           |""".
+          stripMargin)
+      sql("ALTER TABLE long_string_table SET TBLPROPERTIES('long_String_columns'='NAME')")
+    }
+    assert(exceptionCaught.getMessage.contains("LONG_STRING_COLUMNS cannot be present in sort columns: name"))
+  }
+
+  test("check compaction after altering range column dataType to longStringColumn") {
+    val existingValue = CarbonProperties.getInstance()
+      .getProperty(CarbonCommonConstants.COMPACTION_SEGMENT_LEVEL_THRESHOLD)
+    CarbonProperties.getInstance()
+      .addProperty(CarbonCommonConstants.COMPACTION_SEGMENT_LEVEL_THRESHOLD, "2,2")
+      sql(
+        s"""
+           | CREATE TABLE if not exists $longStringTable(
+           | id INT, NAME STRING, description STRING
+           | ) STORED AS carbondata
+           | TBLPROPERTIES('RANGE_COLUMN'='Name')
+           |""".
+          stripMargin)
+    sql("ALTER TABLE long_string_table SET TBLPROPERTIES('long_String_columns'='NAME')")
+    sql("insert into long_string_table select 1, 'ab', 'cool1'")
+    sql("insert into long_string_table select 2, 'abc', 'cool2'")
+    sql("ALTER TABLE long_string_table compact 'minor'")
+    val carbonTable = CarbonMetadata.getInstance().getCarbonTable(
+      CarbonCommonConstants.DATABASE_DEFAULT_NAME, "long_string_table")
+    val absoluteTableIdentifier = carbonTable.getAbsoluteTableIdentifier
+    val segmentStatusManager: SegmentStatusManager = new SegmentStatusManager(absoluteTableIdentifier)
+    val segments = segmentStatusManager.getValidAndInvalidSegments.getValidSegments.asScala.map(_.getSegmentNo).toList
+    assert(segments.contains("0.1"))
+    assert(!segments.contains("0"))
+    assert(!segments.contains("1"))
+    if (existingValue != null) {
+      CarbonProperties.getInstance()
+        .addProperty(CarbonCommonConstants.COMPACTION_SEGMENT_LEVEL_THRESHOLD,
+          existingValue)
+    } else {
+      CarbonProperties.getInstance()
+        .addProperty(CarbonCommonConstants.COMPACTION_SEGMENT_LEVEL_THRESHOLD,
+          CarbonCommonConstants.DEFAULT_SEGMENT_LEVEL_THRESHOLD)
+    }
   }
 
   test("long string columns cannot contain duplicate columns") {
@@ -379,6 +436,43 @@ class VarcharDataTypesBasicTestCase extends QueryTest with BeforeAndAfterEach wi
         "longstr21",mutable.WrappedArray.make(Array("ar1.2","ar1.3")))))
 
     sql("DROP TABLE IF EXISTS varchar_complex_table")
+  }
+
+  test("check new schema after modifying schema through alter table queries when long_string_column is not present") {
+    sql(
+      s"""
+         | CREATE TABLE if not exists $longStringTable(
+         | id INT, name STRING, description STRING, address STRING, note STRING
+         | ) STORED AS carbondata
+         | TBLPROPERTIES('sort_columns'='id,name')
+         |""".
+        stripMargin)
+    sql(s"alter table long_string_table set tblproperties('sort_columns'='ID','sort_scope'='no_sort')")
+    sql(s"alter table long_string_table unset tblproperties('long_string_columns')")
+    val carbonTable = CarbonMetadata.getInstance().getCarbonTable(CarbonCommonConstants.DATABASE_DEFAULT_NAME,
+      "long_string_table")
+    val columns = carbonTable.getTableInfo.getFactTable.getListOfColumns.asScala.toList
+      .filter(column => column.getColumnName.equalsIgnoreCase("name"))
+    assert(columns != null && columns.size > 0 && columns.head.getColumnName.equals("name"))
+  }
+
+  test("check new schema after modifying schema through alter table queries when long_string_column is present") {
+    sql(
+      s"""
+         | CREATE TABLE if not exists $longStringTable(
+         | id INT, name STRING, description STRING, address STRING, note STRING
+         | ) STORED AS carbondata
+         | TBLPROPERTIES('sort_columns'='id,name')
+         |""".
+        stripMargin)
+    sql(s"alter table long_string_table set tblproperties('long_string_columns'='address')")
+    sql(s"alter table long_string_table set tblproperties('sort_columns'='ID','sort_scope'='no_sort')")
+    sql(s"alter table long_string_table unset tblproperties('long_string_columns')")
+    val carbonTable = CarbonMetadata.getInstance().getCarbonTable(CarbonCommonConstants.DATABASE_DEFAULT_NAME,
+      "long_string_table")
+    val columns = carbonTable.getTableInfo.getFactTable.getListOfColumns.asScala.toList
+      .filter(column => column.getColumnName.equalsIgnoreCase("name"))
+    assert(columns != null && columns.size > 0 && columns.head.getColumnName.equals("name"))
   }
   
   test("update table with long string column") {

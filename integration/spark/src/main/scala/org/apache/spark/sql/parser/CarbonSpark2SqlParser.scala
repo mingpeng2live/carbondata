@@ -29,7 +29,7 @@ import org.apache.spark.sql.catalyst.analysis.{UnresolvedAttribute, UnresolvedRe
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.execution.command._
 import org.apache.spark.sql.execution.command.cache.{CarbonDropCacheCommand, CarbonShowCacheCommand}
-import org.apache.spark.sql.execution.command.index.{CarbonCreateIndexCommand, CarbonRefreshIndexCommand, DropIndexCommand, ShowIndexesCommand}
+import org.apache.spark.sql.execution.command.index.{CarbonCreateIndexCommand, CarbonRefreshIndexCommand, DropIndexCommand, IndexRepairCommand, ShowIndexesCommand}
 import org.apache.spark.sql.execution.command.management._
 import org.apache.spark.sql.execution.command.schema.CarbonAlterTableDropColumnCommand
 import org.apache.spark.sql.execution.command.stream.{CarbonCreateStreamCommand, CarbonDropStreamCommand, CarbonShowStreamsCommand}
@@ -97,7 +97,8 @@ class CarbonSpark2SqlParser extends CarbonDDLSqlParser {
     createMV | dropMV | showMV | refreshMV
 
   protected lazy val indexCommands: Parser[LogicalPlan] =
-    createIndex | dropIndex | showIndexes | registerIndexes | refreshIndex
+    createIndex | dropIndex | showIndexes | registerIndexes | refreshIndex | repairIndex |
+      repairIndexDatabase
 
   protected lazy val alterTable: Parser[LogicalPlan] =
     ALTER ~> TABLE ~> (ident <~ ".").? ~ ident ~ (COMPACT ~ stringLit) ~
@@ -190,6 +191,10 @@ class CarbonSpark2SqlParser extends CarbonDDLSqlParser {
             table.database, indexName.toLowerCase, tableColumns, properties)
           CarbonSparkSqlParserUtil.validateColumnCompressorProperty(
             properties.getOrElse(CarbonCommonConstants.COMPRESSOR, null))
+          // validate sort scope
+          CommonUtil.validateSortScope(properties)
+          // validate global_sort_partitions
+          CommonUtil.validateGlobalSortPartitions(properties)
           CarbonCreateSecondaryIndexCommand(
             indexModel,
             properties,
@@ -639,7 +644,9 @@ class CarbonSpark2SqlParser extends CarbonDDLSqlParser {
     val supportedPropertiesForIndexTable = Seq("TABLE_BLOCKSIZE",
       "COLUMN_META_CACHE",
       "CACHE_LEVEL",
-      CarbonCommonConstants.COMPRESSOR.toUpperCase)
+      CarbonCommonConstants.COMPRESSOR.toUpperCase,
+      "SORT_SCOPE",
+      "GLOBAL_SORT_PARTITIONS")
     tableProperties.foreach { property =>
       if (!supportedPropertiesForIndexTable.contains(property._1.toUpperCase)) {
         val errorMessage = "Unsupported Table property in index creation: " + property._1.toString
@@ -668,6 +675,34 @@ class CarbonSpark2SqlParser extends CarbonDDLSqlParser {
         ShowIndexesCommand(table.database, table.table)
     }
 
+  /**
+   * REINDEX INDEX TABLE index_name
+   * ON [db_name.]table_name
+   * [WHERE SEGMENT.ID IN (segment_id, ...)] or
+   *
+   * REINDEX ON [db_name.]table_name
+   * [WHERE SEGMENT.ID IN (segment_id, ...)]
+   */
+  protected lazy val repairIndex: Parser[LogicalPlan] =
+    REINDEX ~> opt(INDEX ~> TABLE ~> ident)  ~ ontable ~
+      (WHERE ~> (SEGMENT ~ "." ~ ID) ~> IN ~> "(" ~> repsep(segmentId, ",") <~ ")").? <~
+    opt(";") ^^ {
+      case indexName ~ tableIdent ~ segments =>
+        IndexRepairCommand(indexName, tableIdent, null, segments)
+    }
+
+  /**
+   * REINDEX DATABASEON db_name
+   * [WHERE SEGMENT.ID IN (segment_id, ...)]
+   */
+  protected lazy val repairIndexDatabase: Parser[LogicalPlan] =
+    REINDEX ~> DATABASE ~> ident ~
+      (WHERE ~> (SEGMENT ~ "." ~ ID) ~> IN ~> "(" ~> repsep(segmentId, ",") <~ ")").? <~
+      opt(";") ^^ {
+      case dbName ~ segments =>
+        IndexRepairCommand(None, null, dbName, segments)
+    }
+
   protected lazy val registerIndexes: Parser[LogicalPlan] =
     REGISTER ~> INDEX ~> TABLE ~> ident ~ ontable <~ opt(";") ^^ {
       case indexTable ~ table =>
@@ -676,7 +711,7 @@ class CarbonSpark2SqlParser extends CarbonDDLSqlParser {
 
   /**
    * REFRESH INDEX index_name
-   * ON [db_name.]table_ame
+   * ON [db_name.]table_name
    * [WHERE SEGMENT.ID IN (segment_id, ...)]
    */
   protected lazy val refreshIndex: Parser[LogicalPlan] =
@@ -693,7 +728,7 @@ class CarbonSpark2SqlParser extends CarbonDDLSqlParser {
       var columnComment: String = ""
       var plainComment: String = ""
       if (col.getComment().isDefined) {
-        columnComment = " comment \"" + col.getComment().get + "\""
+        columnComment = " comment '" + col.getComment().get + "'"
         plainComment = col.getComment().get
       }
       // external table use float data type

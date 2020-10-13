@@ -19,6 +19,7 @@ package org.apache.carbondata.core.metadata.datatype;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.BitSet;
 
@@ -26,7 +27,9 @@ import org.apache.carbondata.core.scan.result.vector.CarbonColumnVector;
 import org.apache.carbondata.core.scan.result.vector.ColumnVectorInfo;
 import org.apache.carbondata.core.scan.result.vector.impl.directread.ColumnarVectorWrapperDirectFactory;
 import org.apache.carbondata.core.util.ByteUtil;
+import org.apache.carbondata.core.util.CarbonUtil;
 import org.apache.carbondata.core.util.DataTypeUtil;
+import org.apache.carbondata.format.Encoding;
 
 /**
  * Decimal converter to keep the data compact.
@@ -109,14 +112,34 @@ public final class DecimalConverterFactory {
     @Override
     public void fillVector(Object valuesToBeConverted, int size,
         ColumnVectorInfo vectorInfo, BitSet nullBitSet, DataType pageType) {
-      // TODO we need to find way to directly set to vector with out conversion. This way is very
-      // inefficient.
-      CarbonColumnVector vector = getCarbonColumnVector(vectorInfo, nullBitSet);
-      int precision = vectorInfo.measure.getMeasure().getPrecision();
-      int newMeasureScale = vectorInfo.measure.getMeasure().getScale();
       if (!(valuesToBeConverted instanceof byte[])) {
         throw new UnsupportedOperationException("This object type " + valuesToBeConverted.getClass()
             + " is not supported in this method");
+      }
+      // TODO we need to find way to directly set to vector with out conversion. This way is very
+      // inefficient.
+      CarbonColumnVector vector = getCarbonColumnVector(vectorInfo, nullBitSet);
+      int precision;
+      int newMeasureScale;
+      if (vectorInfo.measure == null) {
+        // complex primitive decimal flow comes as dimension
+        precision = ((DecimalType) vector.getType()).getPrecision();
+        newMeasureScale = ((DecimalType) vector.getType()).getScale();
+        size = ColumnVectorInfo.getUpdatedPageSizeForChildVector(vectorInfo, size);
+      } else {
+        precision = vectorInfo.measure.getMeasure().getPrecision();
+        newMeasureScale = vectorInfo.measure.getMeasure().getScale();
+      }
+      int shortSizeInBytes = DataTypes.SHORT.getSizeInBytes();
+      int intSizeInBytes = DataTypes.INT.getSizeInBytes();
+      int lengthStoredInBytes;
+      if (vectorInfo.encodings != null && vectorInfo.encodings.size() > 0 && CarbonUtil
+          .hasEncoding(vectorInfo.encodings, Encoding.INT_LENGTH_COMPLEX_CHILD_BYTE_ARRAY)) {
+        lengthStoredInBytes = intSizeInBytes;
+      } else {
+        // before to carbon 2.0, complex child length is stored as SHORT
+        // for string, varchar, binary, date, decimal types
+        lengthStoredInBytes = shortSizeInBytes;
       }
       byte[] data = (byte[]) valuesToBeConverted;
       if (pageType == DataTypes.BYTE) {
@@ -137,7 +160,7 @@ public final class DecimalConverterFactory {
             vector.putNull(i);
           } else {
             BigDecimal value = BigDecimal
-                .valueOf(ByteUtil.toShortLittleEndian(data, i * DataTypes.SHORT.getSizeInBytes()),
+                .valueOf(ByteUtil.toShortLittleEndian(data, i * shortSizeInBytes),
                     scale);
             if (value.scale() < newMeasureScale) {
               value = value.setScale(newMeasureScale);
@@ -146,12 +169,13 @@ public final class DecimalConverterFactory {
           }
         }
       } else if (pageType == DataTypes.SHORT_INT) {
+        int shortIntSizeInBytes = DataTypes.SHORT_INT.getSizeInBytes();
         for (int i = 0; i < size; i++) {
           if (nullBitSet.get(i)) {
             vector.putNull(i);
           } else {
             BigDecimal value = BigDecimal
-                .valueOf(ByteUtil.valueOf3Bytes(data, i * DataTypes.SHORT_INT.getSizeInBytes()),
+                .valueOf(ByteUtil.valueOf3Bytes(data, i * shortIntSizeInBytes),
                     scale);
             if (value.scale() < newMeasureScale) {
               value = value.setScale(newMeasureScale);
@@ -159,32 +183,58 @@ public final class DecimalConverterFactory {
             vector.putDecimal(i, value, precision);
           }
         }
-      } else if (pageType == DataTypes.INT) {
-        for (int i = 0; i < size; i++) {
-          if (nullBitSet.get(i)) {
-            vector.putNull(i);
-          } else {
-            BigDecimal value = BigDecimal
-                .valueOf(ByteUtil.toIntLittleEndian(data, i * DataTypes.INT.getSizeInBytes()),
-                    scale);
-            if (value.scale() < newMeasureScale) {
-              value = value.setScale(newMeasureScale);
+      } else {
+        if (pageType == DataTypes.INT) {
+          for (int i = 0; i < size; i++) {
+            if (nullBitSet.get(i)) {
+              vector.putNull(i);
+            } else {
+              BigDecimal value = BigDecimal
+                  .valueOf(ByteUtil.toIntLittleEndian(data, i * intSizeInBytes),
+                      scale);
+              if (value.scale() < newMeasureScale) {
+                value = value.setScale(newMeasureScale);
+              }
+              vector.putDecimal(i, value, precision);
             }
-            vector.putDecimal(i, value, precision);
           }
-        }
-      } else if (pageType == DataTypes.LONG) {
-        for (int i = 0; i < size; i++) {
-          if (nullBitSet.get(i)) {
-            vector.putNull(i);
-          } else {
-            BigDecimal value = BigDecimal
-                .valueOf(ByteUtil.toLongLittleEndian(data, i * DataTypes.LONG.getSizeInBytes()),
-                    scale);
+        } else if (pageType == DataTypes.LONG) {
+          int longSizeInBytes = DataTypes.LONG.getSizeInBytes();
+          for (int i = 0; i < size; i++) {
+            if (nullBitSet.get(i)) {
+              vector.putNull(i);
+            } else {
+              BigDecimal value = BigDecimal
+                  .valueOf(ByteUtil.toLongLittleEndian(data, i * longSizeInBytes),
+                      scale);
+              if (value.scale() < newMeasureScale) {
+                value = value.setScale(newMeasureScale);
+              }
+              vector.putDecimal(i, value, precision);
+            }
+          }
+        } else if (pageType == DataTypes.BYTE_ARRAY) {
+          // complex primitive decimal dimension
+          int offset = 0;
+          int length;
+          for (int j = 0; j < size; j++) {
+            // here decimal data will be Length[4 byte], scale[1 byte], value[Length byte]
+            if (lengthStoredInBytes == intSizeInBytes) {
+              length = ByteBuffer.wrap(data, offset, lengthStoredInBytes).getInt();
+            } else {
+              length = ByteBuffer.wrap(data, offset, lengthStoredInBytes).getShort();
+            }
+            offset += lengthStoredInBytes;
+            if (length == 0) {
+              vector.putNull(j);
+              continue;
+            }
+            BigDecimal value = DataTypeUtil.byteToBigDecimal(data, offset, length);
             if (value.scale() < newMeasureScale) {
               value = value.setScale(newMeasureScale);
             }
-            vector.putDecimal(i, value, precision);
+            vector.putDecimal(j, value, precision);
+            offset += length;
           }
         }
       }
@@ -278,6 +328,7 @@ public final class DecimalConverterFactory {
     public void fillVector(Object valuesToBeConverted, int size,
         ColumnVectorInfo vectorInfo, BitSet nullBitSet, DataType pageType) {
       CarbonColumnVector vector = getCarbonColumnVector(vectorInfo, nullBitSet);
+      //TODO handle complex child
       int precision = vectorInfo.measure.getMeasure().getPrecision();
       int newMeasureScale = vectorInfo.measure.getMeasure().getScale();
       if (scale < newMeasureScale) {
@@ -329,6 +380,7 @@ public final class DecimalConverterFactory {
     public void fillVector(Object valuesToBeConverted, int size,
         ColumnVectorInfo vectorInfo, BitSet nullBitSet, DataType pageType) {
       CarbonColumnVector vector = getCarbonColumnVector(vectorInfo, nullBitSet);
+      //TODO handle complex child
       int precision = vectorInfo.measure.getMeasure().getPrecision();
       int newMeasureScale = vectorInfo.measure.getMeasure().getScale();
       if (valuesToBeConverted instanceof byte[][]) {
@@ -363,8 +415,8 @@ public final class DecimalConverterFactory {
     CarbonColumnVector vector = vectorInfo.vector;
     BitSet deletedRows = vectorInfo.deletedRows;
     vector = ColumnarVectorWrapperDirectFactory
-        .getDirectVectorWrapperFactory(vector, vectorInfo.invertedIndex, nullBitSet, deletedRows,
-            true, false);
+        .getDirectVectorWrapperFactory(vectorInfo, vector, vectorInfo.invertedIndex, nullBitSet,
+            deletedRows, true, false);
     return vector;
   }
 

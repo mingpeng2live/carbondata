@@ -53,6 +53,7 @@ import org.apache.carbondata.core.statusmanager.{LoadMetadataDetails, SegmentSta
 import org.apache.carbondata.core.util.{CarbonProperties, CarbonUtil}
 import org.apache.carbondata.core.util.path.CarbonTablePath
 import org.apache.carbondata.events.{CreateTablePostExecutionEvent, CreateTablePreExecutionEvent, OperationContext, OperationListenerBus}
+import org.apache.carbondata.spark.util.CarbonSparkUtil
 
 class ErrorMessage(message: String) extends Exception(message) {
 }
@@ -200,7 +201,7 @@ private[sql] case class CarbonCreateSecondaryIndexCommand(
         .map(x => if (!x.isComplex) {
           x.getColName
         })
-      val dimNames = dims.map(x => if (!x.isComplex) {
+      val dimNames = dims.map(x => if (DataTypes.isArrayType(x.getDataType) || !x.isComplex) {
         x.getColName.toLowerCase()
       })
       val isMeasureColPresent = indexModel.columnNames.find(x => msrs.contains(x))
@@ -244,17 +245,6 @@ private[sql] case class CarbonCreateSecondaryIndexCommand(
                                "number of key columns in Source table")
       }
 
-      var isColsIndexedAsPerTable = true
-      for (i <- indexModel.columnNames.indices) {
-        if (!dims(i).getColName.equalsIgnoreCase(indexModel.columnNames(i))) {
-          isColsIndexedAsPerTable = false
-        }
-      }
-
-      if (isColsIndexedAsPerTable) {
-        throw new ErrorMessage(
-          s"Index table column indexing order is same as Parent table column start order")
-      }
       // Should not allow to create index on an index table
       val isIndexTable = carbonTable.isIndexTable
       if (isIndexTable) {
@@ -314,7 +304,7 @@ private[sql] case class CarbonCreateSecondaryIndexCommand(
       //        val tablePath = tableIdentifier.getTablePath
       val carbonSchemaString = catalog.generateTableSchemaString(tableInfo, tableIdentifier)
       // set index information in index table
-      val indexTableMeta = new IndexMetadata(indexTableName, true, carbonTable.getTablePath)
+      val indexTableMeta = new IndexMetadata(tableName, true, carbonTable.getTablePath)
       tableInfo.getFactTable.getTableProperties
         .put(tableInfo.getFactTable.getTableId, indexTableMeta.serialize)
       // set index information in parent table
@@ -322,13 +312,8 @@ private[sql] case class CarbonCreateSecondaryIndexCommand(
         IndexType.SI.getIndexProviderName,
         indexTableName,
         indexProperties)
-
-      val cols = tableInfo.getFactTable.getListOfColumns.asScala.filter(!_.isInvisible)
-      val fields = new Array[String](cols.size)
-      cols.foreach(col =>
-        fields(col.getSchemaOrdinal) =
-          col.getColumnName + ' ' + checkAndPrepareDecimal(col))
-
+      val carbonRelation = CarbonSparkUtil.createCarbonRelation(tableInfo, tablePath)
+      val rawSchema = CarbonSparkUtil.getRawSchema(carbonRelation)
       val operationContext = new OperationContext
       val createTablePreExecutionEvent: CreateTablePreExecutionEvent =
         CreateTablePreExecutionEvent(sparkSession, tableIdentifier, Option(tableInfo))
@@ -339,7 +324,7 @@ private[sql] case class CarbonCreateSecondaryIndexCommand(
         try {
           sparkSession.sql(
             s"""CREATE TABLE $databaseName.$indexTableName
-               |(${ fields.mkString(",") })
+               |($rawSchema)
                |USING carbondata OPTIONS (tableName "$indexTableName",
                |dbName "$databaseName", tablePath "$tablePath", path "$tablePath",
                |parentTablePath "${ carbonTable.getTablePath }", isIndexTable "true",
@@ -443,10 +428,32 @@ private[sql] case class CarbonCreateSecondaryIndexCommand(
       databaseName: String, tableName: String, indexTableName: String,
       absoluteTableIdentifier: AbsoluteTableIdentifier): TableInfo = {
     var schemaOrdinal = -1
-    var allColumns = indexModel.columnNames.map { indexCol =>
-      val colSchema = carbonTable.getDimensionByName(indexCol).getColumnSchema
+    var allColumns = List[ColumnSchema]()
+    var complexColumnExists = false
+    indexModel.columnNames.foreach { indexCol =>
+      val dimension = carbonTable.getDimensionByName(indexCol)
       schemaOrdinal += 1
-      cloneColumnSchema(colSchema, schemaOrdinal)
+      if (dimension.isComplex) {
+        if (complexColumnExists) {
+          throw new ErrorMessage(
+            "SI creation with more than one complex type is not supported yet")
+        }
+        if (dimension.getNumberOfChild > 0) {
+          val complexChildDims = dimension.getListOfChildDimensions.asScala
+          if (complexChildDims.exists(col => DataTypes.isArrayType(col.getDataType))) {
+            throw new ErrorMessage(
+              "SI creation with nested array complex type is not supported yet")
+          }
+        }
+        allColumns = allColumns :+ cloneColumnSchema(
+          dimension.getColumnSchema,
+          schemaOrdinal,
+          dimension.getListOfChildDimensions.get(0).getColumnSchema.getDataType)
+        complexColumnExists = true
+      } else {
+        val colSchema = dimension.getColumnSchema
+        allColumns = allColumns :+ cloneColumnSchema(colSchema, schemaOrdinal)
+      }
     }
     // Setting TRUE on all sort columns
     allColumns.foreach(f => f.setSortColumn(true))
@@ -619,12 +626,24 @@ private[sql] case class CarbonCreateSecondaryIndexCommand(
     columnSchema
   }
 
-  def cloneColumnSchema(parentColumnSchema: ColumnSchema, schemaOrdinal: Int): ColumnSchema = {
+  def cloneColumnSchema(parentColumnSchema: ColumnSchema,
+      schemaOrdinal: Int,
+      dataType: DataType = null): ColumnSchema = {
     val columnSchema = new ColumnSchema()
-    columnSchema.setDataType(parentColumnSchema.getDataType)
+    val encodingList = parentColumnSchema.getEncodingList
+    // if data type is arrayType, then store the column as its CHILD data type in SI
+    if (DataTypes.isArrayType(parentColumnSchema.getDataType)) {
+      columnSchema.setDataType(dataType)
+      if (dataType == DataTypes.DATE) {
+        encodingList.add(Encoding.DIRECT_DICTIONARY)
+        encodingList.add(Encoding.DICTIONARY)
+      }
+    } else {
+      columnSchema.setDataType(parentColumnSchema.getDataType)
+    }
     columnSchema.setColumnName(parentColumnSchema.getColumnName)
     columnSchema.setColumnProperties(parentColumnSchema.getColumnProperties)
-    columnSchema.setEncodingList(parentColumnSchema.getEncodingList)
+    columnSchema.setEncodingList(encodingList)
     columnSchema.setColumnUniqueId(parentColumnSchema.getColumnUniqueId)
     columnSchema.setColumnReferenceId(parentColumnSchema.getColumnReferenceId)
     columnSchema.setDimensionColumn(parentColumnSchema.isDimensionColumn)

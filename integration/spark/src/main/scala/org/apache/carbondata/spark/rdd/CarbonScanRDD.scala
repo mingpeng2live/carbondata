@@ -26,6 +26,7 @@ import scala.reflect.ClassTag
 import scala.util.Random
 import scala.util.control.Breaks.{break, breakable}
 
+import org.apache.commons.lang3.StringUtils
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.mapreduce._
 import org.apache.hadoop.mapreduce.task.TaskAttemptContextImpl
@@ -95,6 +96,16 @@ class CarbonScanRDD[T: ClassTag](
 
   private var readCommittedScope: ReadCommittedScope = _
 
+  // by default, always validate the segment to access.
+  // when set to false,
+  // doesn't validate the segment and allows query on the segments without validation.
+  private var validateSegmentToAccess: Boolean = true
+
+  // Used for setting the current segment file name for partitioned table
+  // during global sort SI load for querying main table.
+  // Which will be same as output committer segment file name.
+  private var currentSegmentFileName: String = _
+
   @transient val LOGGER = LogServiceFactory.getLogService(this.getClass.getName)
 
   override def internalGetPartitions: Array[Partition] = {
@@ -119,10 +130,23 @@ class CarbonScanRDD[T: ClassTag](
       }
       // initialise query_id for job
       job.getConfiguration.set("query.id", queryId)
-
+      if (!StringUtils.isEmpty(currentSegmentFileName)) {
+        // For querying partitioned main table of SI global sort load,
+        // set the configuration for current segment file("current.segment") as
+        // same as carbon output committer
+        job.getConfiguration.set(CarbonCommonConstants.CURRENT_SEGMENTFILE, currentSegmentFileName)
+      }
       if (null != segmentsToAccess) {
         CarbonInputFormat
           .setSegmentsToAccess(job.getConfiguration, segmentsToAccess.toList.asJava)
+        // As we have already set input segments that we got from main table no need to validate.
+        CarbonInputFormat.setValidateSegmentsToAccess(job.getConfiguration, false)
+      } else {
+        if (!validateSegmentToAccess) {
+          // set to false, for SI global sort flow
+          CarbonInputFormat
+            .setValidateSegmentsToAccess(job.getConfiguration, validateSegmentToAccess)
+        }
       }
       // get splits
       getSplitsStartTime = System.currentTimeMillis()
@@ -784,4 +808,13 @@ class CarbonScanRDD[T: ClassTag](
   def setReadCommittedScope(readCommittedScope: ReadCommittedScope): Unit = {
     this.readCommittedScope = readCommittedScope
   }
+
+  def setValidateSegmentToAccess(needValidate: Boolean): Unit = {
+    validateSegmentToAccess = needValidate
+  }
+
+  def setCurrentSegmentFileName(segmentFileName: String): Unit = {
+    currentSegmentFileName = segmentFileName;
+  }
+
 }

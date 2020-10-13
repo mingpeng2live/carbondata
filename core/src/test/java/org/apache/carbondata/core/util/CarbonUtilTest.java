@@ -30,11 +30,11 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.carbondata.core.index.Segment;
 import org.apache.carbondata.core.datastore.block.TableBlockInfo;
 import org.apache.carbondata.core.datastore.chunk.impl.FixedLengthDimensionColumnPage;
 import org.apache.carbondata.core.datastore.filesystem.LocalCarbonFile;
 import org.apache.carbondata.core.datastore.impl.FileFactory;
+import org.apache.carbondata.core.index.Segment;
 import org.apache.carbondata.core.metadata.ColumnarFormatVersion;
 import org.apache.carbondata.core.metadata.blocklet.DataFileFooter;
 import org.apache.carbondata.core.metadata.datatype.DataType;
@@ -927,7 +927,12 @@ public class CarbonUtilTest {
     String blockId = "Part0/Segment_0/part-0-0_batchno0-0-0-1597409791503.snappy.carbondata";
     Assert.assertEquals(CarbonTablePath.getShortBlockId(blockId), "0/0-0_0-0-0-1597409791503");
     blockId = "c3=aa/part-0-100100000100001_batchno0-0-0-1597411003332.snappy.carbondata";
-    Assert.assertEquals(CarbonTablePath.getShortBlockIdForPartitionTable(blockId), "c3=aa/0-100100000100001_0-0-0-1597411003332");
+    Assert.assertEquals(CarbonTablePath.getShortBlockId(blockId), "c3=aa/0-100100000100001_0-0-0-1597411003332");
+    // CACHE_LEVEL = BLOCKLET case
+    blockId = "Part0/Segment_0/part-0-0_batchno0-0-0-1597409791503.snappy.carbondata/0";
+    Assert.assertEquals(CarbonTablePath.getShortBlockId(blockId), "0/0-0_0-0-0-1597409791503/0");
+    blockId = "c3=aa/part-0-100100000100001_batchno0-0-0-1597411003332.snappy.carbondata/0";
+    Assert.assertEquals(CarbonTablePath.getShortBlockId(blockId), "c3=aa/0-100100000100001_0-0-0-1597411003332/0");
     // external segment case
     blockId = "#home#root1#Projects#carbondata#integration#spark#target#warehouse#addsegtest#/Segment_2/part-0-0_batchno0-0-1-1597411388431.snappy.carbondata";
     Assert.assertEquals(CarbonTablePath.getShortBlockId(blockId), "#home#root1#Projects#carbondata#integration#spark#target#warehouse#addsegtest#/2/0-0_0-0-1-1597411388431");
@@ -945,6 +950,12 @@ public class CarbonUtilTest {
     Assert.assertEquals(CarbonUpdateUtil.getSegmentBlockNameKey("0", blockName, false), "0/0-0_0-0-0-1597412488102");
     // partition table
     Assert.assertEquals(CarbonUpdateUtil.getSegmentBlockNameKey("0", blockName, true), "0-0_0-0-0-1597412488102");
+  }
+
+  @Test public void testSegmentNumberFromSegmentFile() {
+    String segmentFileName = "0_1597411003332";
+    Assert.assertEquals("0",
+        CarbonTablePath.DataFileUtil.getSegmentNoFromSegmentFile(segmentFileName));
   }
 
   private String generateString(int length) {

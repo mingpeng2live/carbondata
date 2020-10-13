@@ -152,8 +152,10 @@ public final class TableIndex extends OperationEventListener {
     int numOfThreadsForPruning = CarbonProperties.getNumOfThreadsForPruning();
     int carbonDriverPruningMultiThreadEnableFilesCount =
         CarbonProperties.getDriverPruningMultiThreadEnableFilesCount();
+    // when the query is without filter, as we need to return all the blocklets,
+    // so no need of multi-thread pruning
     if (numOfThreadsForPruning == 1 || indexesCount < numOfThreadsForPruning || totalFiles
-            < carbonDriverPruningMultiThreadEnableFilesCount) {
+            < carbonDriverPruningMultiThreadEnableFilesCount || !isFilterPresent) {
       // use multi-thread, only if the files are more than 0.1 million.
       // As 0.1 million files block pruning can take only 1 second.
       // Doing multi-thread for smaller values is not recommended as
@@ -605,7 +607,7 @@ public final class TableIndex extends OperationEventListener {
     for (Segment segment : segments) {
       List<CoarseGrainIndex> indexes = defaultIndex.getIndexFactory().getIndexes(segment);
       for (CoarseGrainIndex index : indexes) {
-        if (null != partitions) {
+        if (null != partitions && !partitions.isEmpty()) {
           // if it has partitioned index but there is no partitioned information stored, it means
           // partitions are dropped so return empty list.
           if (index.validatePartitionInfo(partitions)) {

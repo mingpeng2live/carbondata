@@ -1881,7 +1881,9 @@ public final class CarbonUtil {
     gsonBuilder.registerTypeAdapter(DataType.class, new DataTypeAdapter());
 
     Gson gson = gsonBuilder.create();
-    TableInfo tableInfo = gson.fromJson(builder.toString(), TableInfo.class);
+    // if the column name contains backslash in the column name, then fromJson will remove that,
+    // so replace like below to keep the "\" in column name and write the proper name in the schema
+    TableInfo tableInfo = gson.fromJson(builder.toString().replace("\\", "\\\\"), TableInfo.class);
 
     // The tableInfo is deserialize from GSON string, need to update the scale and
     // precision if there are any decimal field, because DecimalType is added in Carbon 1.3,
@@ -3302,13 +3304,12 @@ public final class CarbonUtil {
     // so just take all other columns at once.
     int otherColumnStartIndex = -1;
     for (int i = 0; i < columns.size(); i++) {
-      if (columns.get(i).getColumnProperties() != null) {
-        String isSortColumn =
-            columns.get(i).getColumnProperties().get(CarbonCommonConstants.SORT_COLUMNS);
-        if ((isSortColumn != null) && (isSortColumn.equalsIgnoreCase("true"))) {
-          // add sort column dimensions
-          sortColumns.add(columns.get(i));
-        }
+      Map<String, String> columnProperties = columns.get(i).getColumnProperties();
+      if (columnProperties != null
+          && columnProperties.get(CarbonCommonConstants.SORT_COLUMNS) != null
+          && columnProperties.get(CarbonCommonConstants.SORT_COLUMNS).equalsIgnoreCase("true")) {
+        // add sort column dimensions
+        sortColumns.add(columns.get(i));
       } else if ((columns.get(i).getData_type() == org.apache.carbondata.format.DataType.ARRAY
           || columns.get(i).getData_type() == org.apache.carbondata.format.DataType.STRUCT
           || columns.get(i).getData_type() == org.apache.carbondata.format.DataType.MAP || (!columns
@@ -3344,6 +3345,8 @@ public final class CarbonUtil {
     // for setting long string columns
     if (!longStringColumnsString.isEmpty()) {
       String[] inputColumns = longStringColumnsString.split(",");
+      inputColumns = Arrays.stream(inputColumns).map(String::trim)
+              .map(String::toLowerCase).toArray(String[]::new);
       Set<String> longStringSet = new HashSet<>(Arrays.asList(inputColumns));
       List<org.apache.carbondata.format.ColumnSchema> varCharColumns = new ArrayList<>();
       // change data type to varchar and extract the varchar columns
