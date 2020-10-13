@@ -16,6 +16,7 @@
  */
 package org.apache.carbondata.spark.testsuite.allqueries
 
+import org.apache.spark.sql.CarbonEnv
 import org.apache.spark.sql.test.util.QueryTest
 import org.scalatest.BeforeAndAfterAll
 
@@ -389,6 +390,48 @@ class InsertIntoCarbonTableTestCase extends QueryTest with BeforeAndAfterAll {
       sql("insert into table1 select * from table2")
     }
     assert(e.getMessage.contains("number of columns are different"))
+  }
+
+  test("test insert into partitioned table with int type to double type") {
+    sql("DROP TABLE IF EXISTS table1")
+    sql("CREATE TABLE table1 (cnt double) partitioned by (pt string) stored as carbondata")
+    sql("insert overwrite table table1 partition(pt='2020') select 10")
+    checkAnswer(
+      sql("select * from table1"),
+      sql("select 10.0, '2020'")
+    )
+    sql(s"DROP TABLE IF EXISTS table1")
+  }
+
+  test("test loading data into partitioned table with segment's updateDeltaEndTimestamp not change") {
+    val tableName = "test_partitioned_table"
+    sql(s"drop table if exists $tableName")
+    sql(s"""
+           |create table if not exists $tableName(
+           |  id bigint,
+           |  name string
+           |)
+           |STORED AS carbondata
+           |partitioned by (dt string)
+           |""".stripMargin)
+    val carbonTable = CarbonEnv.getCarbonTable(
+      Option(CarbonCommonConstants.DATABASE_DEFAULT_NAME), tableName)(sqlContext.sparkSession)
+    val dt1 = "dt1"
+    sql(s"insert overwrite table $tableName partition(dt='$dt1') select 1, 'a'")
+    val dt1Metas = SegmentStatusManager.readLoadMetadata(carbonTable.getMetadataPath)
+    assert(dt1Metas.length == 1)
+    val dt1Seg1 = dt1Metas(0)
+
+    val dt2 = "dt2"
+    sql(s"insert overwrite table $tableName partition(dt='$dt2') select 1, 'a'")
+    val dt2Metas = SegmentStatusManager.readLoadMetadata(carbonTable.getMetadataPath)
+    assert(dt2Metas.length == 2)
+    val dt2Seg1 = dt2Metas(0)
+    val dt2Seg2 = dt2Metas(1)
+
+    assert(dt1Seg1.getUpdateDeltaEndTimestamp == dt2Seg1.getUpdateDeltaEndTimestamp)
+    assert(dt1Seg1.getUpdateDeltaEndTimestamp != dt2Seg2.getUpdateDeltaEndTimestamp)
+    sql(s"drop table if exists $tableName")
   }
 
   override def afterAll {

@@ -414,7 +414,7 @@ object AlterTableUtil {
       // validate the range column properties
       validateRangeColumnProperties(carbonTable, lowerCasePropertiesMap)
 
-      validateGlobalSortPartitions(carbonTable, lowerCasePropertiesMap)
+      CommonUtil.validateGlobalSortPartitions(lowerCasePropertiesMap)
 
       // validate the Sort Scope and Sort Columns
       validateSortScopeAndSortColumnsProperties(carbonTable,
@@ -442,7 +442,9 @@ object AlterTableUtil {
         // update schema for long string columns
         updateSchemaForLongStringColumns(thriftTable, longStringColumns.get)
       } else if (propKeys.exists(_.equalsIgnoreCase("long_string_columns") && !set)) {
-        updateSchemaForLongStringColumns(thriftTable, "")
+        if (tblPropertiesMap.exists(prop => prop._1.equalsIgnoreCase("long_string_columns"))) {
+          updateSchemaForLongStringColumns(thriftTable, "")
+        }
       }
       // below map will be used for cache invalidation. As tblProperties map is getting modified
       // in the next few steps the original map need to be retained for any decision making
@@ -625,27 +627,6 @@ object AlterTableUtil {
           s" is not exists in the table")
       } else {
         propertiesMap.put(CarbonCommonConstants.RANGE_COLUMN, rangeColumn.getColName)
-      }
-    }
-  }
-
-  def validateGlobalSortPartitions(carbonTable: CarbonTable,
-      propertiesMap: mutable.Map[String, String]): Unit = {
-    if (propertiesMap.get("global_sort_partitions").isDefined) {
-      val globalSortPartitionsProp = propertiesMap.get("global_sort_partitions").get
-      var pass = false
-      try {
-        val globalSortPartitions = Integer.parseInt(globalSortPartitionsProp)
-        if (globalSortPartitions > 0) {
-          pass = true
-        }
-      } catch {
-        case _ =>
-      }
-      if (!pass) {
-        throw new MalformedCarbonCommandException(
-          s"Table property global_sort_partitions : ${ globalSortPartitionsProp }" +
-          s" is invalid")
       }
     }
   }
@@ -886,7 +867,7 @@ object AlterTableUtil {
   def validateLongStringColumns(longStringColumns: String,
       carbonTable: CarbonTable): Unit = {
     // don't allow duplicate column names
-    val longStringCols = longStringColumns.split(",")
+    val longStringCols = longStringColumns.split(",").map(column => column.trim.toLowerCase)
     if (longStringCols.distinct.lengthCompare(longStringCols.size) != 0) {
       val duplicateColumns = longStringCols
         .diff(longStringCols.distinct).distinct
@@ -898,14 +879,14 @@ object AlterTableUtil {
     // check if the column specified exists in table schema and must be of string data type
     val colSchemas = carbonTable.getTableInfo.getFactTable.getListOfColumns.asScala
     longStringCols.foreach { col =>
-      if (!colSchemas.exists(x => x.getColumnName.equalsIgnoreCase(col.trim))) {
-        val errorMsg = "LONG_STRING_COLUMNS column: " + col.trim +
+      if (!colSchemas.exists(x => x.getColumnName.equalsIgnoreCase(col))) {
+        val errorMsg = "LONG_STRING_COLUMNS column: " + col +
                        " does not exist in table. Please check the DDL."
         throw new MalformedCarbonCommandException(errorMsg)
-      } else if (colSchemas.exists(x => x.getColumnName.equalsIgnoreCase(col.trim) &&
+      } else if (colSchemas.exists(x => x.getColumnName.equalsIgnoreCase(col) &&
                                           !x.getDataType.toString
                                             .equalsIgnoreCase("STRING"))) {
-        val errMsg = "LONG_STRING_COLUMNS column: " + col.trim +
+        val errMsg = "LONG_STRING_COLUMNS column: " + col +
                      " is not a string datatype column"
         throw new MalformedCarbonCommandException(errMsg)
       }

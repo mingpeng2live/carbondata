@@ -21,12 +21,14 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Arrays;
 
 import org.apache.carbondata.hive.test.server.HiveEmbeddedServer2;
 
 import org.junit.Assert;
-
-import javax.validation.constraints.AssertTrue;
 
 /**
  * A utility class to start and stop the Hive Embedded Server.
@@ -53,11 +55,18 @@ public abstract class HiveTestUtils {
     }
   }
 
+  public boolean checkMapKeyPairsAfterSorting(String a, String b) {
+    String[] actual = a.substring(1, a.length() - 1).split(",");
+    String[] expected = b.substring(1, a.length() - 1).split(",");
+    Arrays.sort(actual);Arrays.sort(expected);
+    return Arrays.equals(actual, expected);
+  }
+
   public boolean checkAnswer(ResultSet actual, ResultSet expected) throws SQLException {
     Assert.assertEquals("Row Count Mismatch: ", expected.getFetchSize(), actual.getFetchSize());
-    int rowCountExpected = 0;
+    List<String> expectedValuesList = new ArrayList<>();
+    List<String> actualValuesList = new ArrayList<>();
     while (expected.next()) {
-      rowCountExpected ++;
       if (!actual.next()) {
         return false;
       }
@@ -65,11 +74,16 @@ public abstract class HiveTestUtils {
       Assert.assertTrue(numOfColumnsExpected > 0);
       Assert.assertEquals(actual.getMetaData().getColumnCount(), numOfColumnsExpected);
       for (int i = 1; i <= numOfColumnsExpected; i++) {
-        Assert.assertEquals(actual.getString(i), actual.getString(i));
+        if (actual.getString(i).contains(":")) {
+          Assert.assertTrue(checkMapKeyPairsAfterSorting(actual.getString(i), expected.getString(i)));
+        } else {
+          expectedValuesList.add(expected.getString(i));
+          actualValuesList.add(actual.getString(i));
+        }
       }
-      System.out.println();
     }
-    Assert.assertTrue(rowCountExpected > 0);
+    Collections.sort(expectedValuesList);Collections.sort(actualValuesList);
+    Assert.assertArrayEquals(expectedValuesList.toArray(), actualValuesList.toArray());
     return true;
   }
 

@@ -1,3 +1,4 @@
+
 <!--
     Licensed to the Apache Software Foundation (ASF) under one or more
     contributor license agreements.  See the NOTICE file distributed with
@@ -23,6 +24,7 @@
 * [Querying Data](#querying-data)
 * [Compaction](#compacting-SI-table)
 * [DDLs on Secondary Index](#DDLs-on-Secondary-Index)
+* [Complex DataType support on SI](#Complex-DataType-support-on-SI)
 
 ## Quick example
 
@@ -82,7 +84,8 @@ EXPLAIN SELECT a from maintable where c = 'cd';
   'carbondata'
   PROPERTIES('table_blocksize'='1')
   ```
- 
+  **NOTE**:
+  * supported properties are table_blocksize, column_meta_cache, cache_level, carbon.column.compressor, sort_scope and global_sort_partitions.
  
 #### How SI tables are selected
 
@@ -189,3 +192,28 @@ Syntax
   ```
   REGISTER INDEX TABLE index_name ON [TABLE] [db_name.]table_name
   ```
+
+### Reindex Command
+This command is used to reload segments in the SI table in case when there is some mismatch in the number
+of segments with main table.
+
+Syntax
+
+Reindex on all the secondary Indexes of the main table
+  ```
+  REINDEX ON TABLE [db_name.]main_table_name [WHERE SEGMENT.ID IN(0,1)]
+  ```
+Reindexing at index table level
+
+  ```
+  REINDEX INDEX TABLE index_table ON [db_name.]main_table_name [WHERE SEGMENT.ID IN (1)]
+  ```
+Reindex on Database level
+  ```
+  REINDEX DATABASE db_name [WHERE SEGMENT.ID IN (1,2,5)]
+  ```
+Note: This command is not supported with other concurrent operations.
+
+## Complex DataType support on SI
+Currently, only complex Array types are supported for creating secondary indexes. Nested Array
+support and other complex types support will be supported in the future.

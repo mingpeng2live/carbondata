@@ -29,21 +29,7 @@ import org.apache.carbondata.core.constants.CarbonCommonConstants;
 import org.apache.carbondata.core.constants.CarbonLoadOptionConstants;
 import org.apache.carbondata.core.exception.InvalidConfigurationException;
 
-import static org.apache.carbondata.core.constants.CarbonCommonConstants.CARBON_CUSTOM_BLOCK_DISTRIBUTION;
-import static org.apache.carbondata.core.constants.CarbonCommonConstants.CARBON_ENABLE_INDEX_SERVER;
-import static org.apache.carbondata.core.constants.CarbonCommonConstants.CARBON_ENABLE_MV;
-import static org.apache.carbondata.core.constants.CarbonCommonConstants.CARBON_MAJOR_COMPACTION_SIZE;
-import static org.apache.carbondata.core.constants.CarbonCommonConstants.CARBON_PUSH_ROW_FILTERS_FOR_VECTOR;
-import static org.apache.carbondata.core.constants.CarbonCommonConstants.CARBON_QUERY_STAGE_INPUT;
-import static org.apache.carbondata.core.constants.CarbonCommonConstants.COMPACTION_SEGMENT_LEVEL_THRESHOLD;
-import static org.apache.carbondata.core.constants.CarbonCommonConstants.ENABLE_AUTO_LOAD_MERGE;
-import static org.apache.carbondata.core.constants.CarbonCommonConstants.ENABLE_OFFHEAP_SORT;
-import static org.apache.carbondata.core.constants.CarbonCommonConstants.ENABLE_SI_LOOKUP_PARTIALSTRING;
-import static org.apache.carbondata.core.constants.CarbonCommonConstants.ENABLE_UNSAFE_IN_QUERY_EXECUTION;
-import static org.apache.carbondata.core.constants.CarbonCommonConstants.ENABLE_UNSAFE_SORT;
-import static org.apache.carbondata.core.constants.CarbonCommonConstants.ENABLE_VECTOR_READER;
-import static org.apache.carbondata.core.constants.CarbonCommonConstants.NUM_CORES_COMPACTING;
-import static org.apache.carbondata.core.constants.CarbonCommonConstants.NUM_CORES_LOADING;
+import static org.apache.carbondata.core.constants.CarbonCommonConstants.*;
 import static org.apache.carbondata.core.constants.CarbonLoadOptionConstants.CARBON_OPTIONS_BAD_RECORDS_ACTION;
 import static org.apache.carbondata.core.constants.CarbonLoadOptionConstants.CARBON_OPTIONS_BAD_RECORDS_LOGGER_ENABLE;
 import static org.apache.carbondata.core.constants.CarbonLoadOptionConstants.CARBON_OPTIONS_BAD_RECORD_PATH;
@@ -153,6 +139,8 @@ public class SessionParams implements Serializable, Cloneable {
       case ENABLE_UNSAFE_IN_QUERY_EXECUTION:
       case ENABLE_AUTO_LOAD_MERGE:
       case CARBON_PUSH_ROW_FILTERS_FOR_VECTOR:
+      case CARBON_LOAD_DATEFORMAT_SETLENIENT_ENABLE:
+      case CARBON_LOAD_SI_REPAIR:
       case CARBON_ENABLE_INDEX_SERVER:
       case CARBON_QUERY_STAGE_INPUT:
       case CARBON_ENABLE_MV:
@@ -179,6 +167,7 @@ public class SessionParams implements Serializable, Cloneable {
         break;
       case CARBON_OPTIONS_GLOBAL_SORT_PARTITIONS:
       case NUM_CORES_LOADING:
+      case CARBON_SI_REPAIR_LIMIT:
       case NUM_CORES_COMPACTING:
       case BLOCKLET_SIZE_IN_MB:
       case CARBON_MAJOR_COMPACTION_SIZE:
@@ -213,6 +202,13 @@ public class SessionParams implements Serializable, Cloneable {
       default:
         if (key.startsWith(CARBON_ENABLE_INDEX_SERVER) && key.split("\\.").length == 6) {
           isValid = true;
+        } else if (key.startsWith(CARBON_SI_REPAIR_LIMIT)) {
+          isValid = CarbonUtil.validateValidIntType(value);
+          if (!isValid) {
+            throw new InvalidConfigurationException("Invalid CARBON_SI_REPAIR_LIMIT");
+          }
+        } else if (key.startsWith(CARBON_LOAD_SI_REPAIR) && key.split("\\.").length == 6) {
+          isValid = true;
         } else if (key.startsWith(CarbonCommonConstants.CARBON_INPUT_SEGMENTS)) {
           isValid = CarbonUtil.validateRangeOfSegmentList(value);
           if (!isValid) {
@@ -231,6 +227,8 @@ public class SessionParams implements Serializable, Cloneable {
             throw new InvalidConfigurationException("The sort scope " + key
                 + " can have only either NO_SORT, LOCAL_SORT or GLOBAL_SORT.");
           }
+        } else if (key.equalsIgnoreCase(CARBON_REORDER_FILTER)) {
+          isValid = true;
         } else {
           throw new InvalidConfigurationException(
               "The key " + key + " not supported for dynamic configuration.");

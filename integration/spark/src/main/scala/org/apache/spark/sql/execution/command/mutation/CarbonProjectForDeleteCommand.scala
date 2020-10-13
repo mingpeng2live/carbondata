@@ -96,10 +96,10 @@ private[sql] case class CarbonProjectForDeleteCommand(
     try {
       lockStatus = metadataLock.lockWithRetries()
       if (lockStatus) {
-        if (!compactionLock.lockWithRetries(3, 3)) {
+        if (!compactionLock.lockWithRetries()) {
           throw new ConcurrentOperationException(carbonTable, "compaction", "delete")
         }
-        if (!updateLock.lockWithRetries(3, 3)) {
+        if (!updateLock.lockWithRetries()) {
           throw new ConcurrentOperationException(carbonTable, "update/delete", "delete")
         }
         LOGGER.info("Successfully able to get the table metadata file lock")
@@ -169,8 +169,19 @@ private[sql] case class CarbonProjectForDeleteCommand(
       if (lockStatus) {
         CarbonLockUtil.fileUnlock(metadataLock, LockUsage.METADATA_LOCK)
       }
-      updateLock.unlock()
-      compactionLock.unlock()
+
+      if (updateLock.unlock()) {
+        LOGGER.info(s"updateLock unlocked successfully after delete operation $tableName")
+      } else {
+        LOGGER.error(s"Unable to unlock updateLock for table $tableName after delete operation");
+      }
+
+      if (compactionLock.unlock()) {
+        LOGGER.info(s"compactionLock unlocked successfully after delete operation $tableName")
+      } else {
+        LOGGER.error(s"Unable to unlock compactionLock for " +
+          s"table $tableName after delete operation");
+      }
     }
   }
 

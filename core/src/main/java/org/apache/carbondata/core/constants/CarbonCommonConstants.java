@@ -1274,11 +1274,31 @@ public final class CarbonCommonConstants {
   public static final String CARBON_MAX_DRIVER_LRU_CACHE_SIZE = "carbon.max.driver.lru.cache.size";
 
   /**
+   * max driver lru cache size upto which partition lru cache will be loaded in memory
+   */
+  @CarbonProperty
+  public static final String CARBON_PARTITION_MAX_DRIVER_LRU_CACHE_SIZE =
+      "carbon.partition.max.driver.lru.cache.size";
+
+  /**
    * max executor lru cache size upto which lru cache will be loaded in memory
    */
   @CarbonProperty
   public static final String CARBON_MAX_EXECUTOR_LRU_CACHE_SIZE =
       "carbon.max.executor.lru.cache.size";
+
+  /**
+   * executor lru cache percent upto which lru cache will be loaded in memory.
+   * Value lies between (1 - 100)
+   */
+  @CarbonProperty
+  public static final String CARBON_EXECUTOR_LRU_CACHE_PERCENT =
+          "carbon.executor.lru.cache.percent";
+
+  /**
+   * when executor LRU cache is not configured, set it to 70% percent of executor memory size
+   */
+  public static final double CARBON_DEFAULT_EXECUTOR_LRU_CACHE_PERCENT = 0.7d;
 
   /**
    * max lru cache size default value in MB
@@ -1592,6 +1612,16 @@ public final class CarbonCommonConstants {
 
   public static final String CARBON_LUCENE_INDEX_STOP_WORDS_DEFAULT = "false";
 
+  // Property to enable parsing the timestamp/date data with setLenient = true in load
+  // flow if it fails with parse invalid timestamp data. (example: 1941-03-15 00:00:00
+  // is valid time in Asia/Calcutta zone and is invalid and will fail to parse in Asia/Shanghai
+  // zone as DST is observed and clocks were turned forward 1 hour to 1941-03-15 01:00:00)
+  @CarbonProperty(dynamicConfigurable = true)
+  public static final String
+      CARBON_LOAD_DATEFORMAT_SETLENIENT_ENABLE = "carbon.load.dateformat.setlenient.enable";
+
+  public static final String CARBON_LOAD_DATEFORMAT_SETLENIENT_ENABLE_DEFAULT = "false";
+
   //////////////////////////////////////////////////////////////////////////////////////////
   // Constant value start here
   //////////////////////////////////////////////////////////////////////////////////////////
@@ -1766,6 +1796,21 @@ public final class CarbonCommonConstants {
   public static final String CSV_FILE_EXTENSION = ".csv";
 
   /**
+   * AVRO_FILE_EXTENSION
+   */
+  public static final String AVRO_FILE_EXTENSION = ".avro";
+
+  /**
+   * JSON_FILE_EXTENSION
+   */
+  public static final String JSON_FILE_EXTENSION = ".json";
+
+  /**
+   * ORC_FILE_EXTENSION
+   */
+  public static final String ORC_FILE_EXTENSION = ".orc";
+
+  /**
    * LOG_FILE_EXTENSION
    */
   public static final String LOG_FILE_EXTENSION = ".log";
@@ -1831,6 +1876,11 @@ public final class CarbonCommonConstants {
    * UNDERSCORE
    */
   public static final String UNDERSCORE = "_";
+
+  /**
+   * EQUALS
+   */
+  public static final String EQUALS = "=";
 
   /**
    * POINT
@@ -2263,6 +2313,26 @@ public final class CarbonCommonConstants {
       500;
 
   /**
+   * Configured property to enable/disable load failed segments in SI table during
+   * load/insert command.
+   */
+  @CarbonProperty(dynamicConfigurable = true)
+  public static final String CARBON_LOAD_SI_REPAIR =  "carbon.load.si.repair";
+
+  /**
+   * Default value for load failed segments in SI table during
+   * load/insert command.
+   */
+  public static final String CARBON_LOAD_SI_REPAIR_DEFAULT = "true";
+
+  /**
+   * Property to give a limit to the number of segments that are reloaded in the
+   * SI table in the FailedSegments listener.
+   */
+  @CarbonProperty(dynamicConfigurable = true)
+  public static final String CARBON_SI_REPAIR_LIMIT =  "carbon.si.repair.limit";
+
+  /**
    * Set it to true to enable audit
    */
   public static final String CARBON_ENABLE_AUDIT = "carbon.audit.enabled";
@@ -2470,7 +2540,7 @@ public final class CarbonCommonConstants {
   public static final String CARBON_INDEXSERVER_TEMPFOLDER_DELETETIME_DEFAULT = "10800000";
 
   public static final String STRING_LENGTH_EXCEEDED_MESSAGE =
-      "Record %s of column %s exceeded " + MAX_CHARS_PER_COLUMN_DEFAULT +
+      "Record of column %s exceeded " + MAX_CHARS_PER_COLUMN_DEFAULT +
           " characters. Please consider long string data type.";
 
   /**
@@ -2482,4 +2552,27 @@ public final class CarbonCommonConstants {
    * property which defines the presto query default value
    */
   public static final String IS_QUERY_FROM_PRESTO_DEFAULT = "false";
+
+  /**
+   * the level 1 complex delimiter default value
+   */
+  public static final String COMPLEX_DELIMITER_LEVEL_1_DEFAULT = "#";
+
+  /**
+   * the level 2 complex delimiter default value
+   */
+  public static final String COMPLEX_DELIMITER_LEVEL_2_DEFAULT = "$";
+
+  /**
+   * the level 3 complex delimiter default value
+   */
+  public static final String COMPLEX_DELIMITER_LEVEL_3_DEFAULT = "@";
+
+  public static final String FILE_HEADER = "fileHeader";
+
+  @CarbonProperty(dynamicConfigurable = true)
+  public static final String CARBON_REORDER_FILTER = "carbon.reorder.filter";
+
+  public static final String CARBON_REORDER_FILTER_DEFAULT = "true";
+
 }

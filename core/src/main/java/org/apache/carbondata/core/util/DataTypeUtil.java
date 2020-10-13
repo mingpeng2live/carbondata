@@ -34,6 +34,7 @@ import org.apache.carbondata.core.datastore.page.ColumnPage;
 import org.apache.carbondata.core.datastore.page.encoding.bool.BooleanConvert;
 import org.apache.carbondata.core.keygenerator.directdictionary.DirectDictionaryGenerator;
 import org.apache.carbondata.core.keygenerator.directdictionary.DirectDictionaryKeyGeneratorFactory;
+import org.apache.carbondata.core.keygenerator.directdictionary.timestamp.DateDirectDictionaryGenerator;
 import org.apache.carbondata.core.metadata.datatype.DataType;
 import org.apache.carbondata.core.metadata.datatype.DataTypes;
 import org.apache.carbondata.core.metadata.schema.table.column.CarbonColumn;
@@ -326,6 +327,11 @@ public final class DataTypeUtil {
           return null;
         }
         return Float.parseFloat(data);
+      } else if (actualDataType == DataTypes.BYTE) {
+        if (data.isEmpty()) {
+          return null;
+        }
+        return Byte.parseByte(data);
       } else if (actualDataType == DataTypes.DOUBLE) {
         if (data.isEmpty()) {
           return null;
@@ -435,7 +441,8 @@ public final class DataTypeUtil {
 
   private static Object parseTimestamp(String dimensionValue, String dateFormat) {
     Date dateToStr;
-    DateFormat dateFormatter;
+    DateFormat dateFormatter = null;
+    long timeValue;
     try {
       if (null != dateFormat && !dateFormat.trim().isEmpty()) {
         dateFormatter = new SimpleDateFormat(dateFormat);
@@ -444,9 +451,40 @@ public final class DataTypeUtil {
         dateFormatter = timestampFormatter.get();
       }
       dateToStr = dateFormatter.parse(dimensionValue);
-      return dateToStr.getTime();
+      timeValue = dateToStr.getTime();
+      validateTimeStampRange(timeValue);
+      return timeValue;
     } catch (ParseException e) {
-      throw new NumberFormatException(e.getMessage());
+      // If the parsing fails, try to parse again with setLenient to true if the property is set
+      // (example: 1941-03-15 00:00:00 is invalid data and will fail to parse in Asia/Shanghai zone
+      // as DST is observed and clocks were turned forward 1 hour to 1941-03-15 01:00:00)
+      if (CarbonProperties.getInstance().isSetLenientEnabled()) {
+        try {
+          dateFormatter.setLenient(true);
+          dateToStr = dateFormatter.parse(dimensionValue);
+          timeValue = dateToStr.getTime();
+          validateTimeStampRange(timeValue);
+          LOGGER.info("Parsed data with lenience as true, setting back to default mode");
+          return timeValue;
+        } catch (ParseException ex) {
+          LOGGER.info("Failed to parse data with lenience as true, setting back to default mode");
+          throw new NumberFormatException(ex.getMessage());
+        } finally {
+          dateFormatter.setLenient(false);
+        }
+      } else {
+        throw new NumberFormatException(e.getMessage());
+      }
+    }
+  }
+
+  private static void validateTimeStampRange(Long timeValue) {
+    if (timeValue < DateDirectDictionaryGenerator.MIN_VALUE
+        || timeValue > DateDirectDictionaryGenerator.MAX_VALUE) {
+      throw new NumberFormatException(
+          "timestamp column data value: " + timeValue + "is not in valid range of: "
+              + DateDirectDictionaryGenerator.MIN_VALUE + " and "
+              + DateDirectDictionaryGenerator.MAX_VALUE);
     }
   }
 
@@ -535,6 +573,12 @@ public final class DataTypeUtil {
         && !DataTypes.isDecimal(dataType);
   }
 
+  public static Object getDataBasedOnDataTypeForNoDictionaryColumn(byte[] dataInBytes,
+      DataType actualDataType, boolean isTimeStampConversion) {
+    return getDataBasedOnDataTypeForNoDictionaryColumn(dataInBytes, actualDataType,
+        isTimeStampConversion, false);
+  }
+
   /**
    * Wrapper for actual getDataBasedOnDataTypeForNoDictionaryColumn.
    *
@@ -544,7 +588,7 @@ public final class DataTypeUtil {
    */
   public static Object getDataBasedOnDataTypeForNoDictionaryColumn(byte[] dataInBytes,
       DataType actualDataType) {
-    return getDataBasedOnDataTypeForNoDictionaryColumn(dataInBytes, actualDataType, true);
+    return getDataBasedOnDataTypeForNoDictionaryColumn(dataInBytes, actualDataType, true, false);
   }
 
   /**
@@ -557,7 +601,7 @@ public final class DataTypeUtil {
    * @return actual data after conversion
    */
   public static Object getDataBasedOnDataTypeForNoDictionaryColumn(byte[] dataInBytes,
-      DataType actualDataType, boolean isTimeStampConversion) {
+      DataType actualDataType, boolean isTimeStampConversion, boolean getBytesData) {
     if (null == dataInBytes || Arrays
         .equals(CarbonCommonConstants.MEMBER_DEFAULT_VAL_ARRAY, dataInBytes)) {
       return null;
@@ -614,6 +658,9 @@ public final class DataTypeUtil {
         }
         return dataInBytes;
       } else {
+        if (getBytesData) {
+          return dataInBytes;
+        }
         // Default action for String/Varchar
         return getDataTypeConverter().convertFromByteToUTF8String(dataInBytes);
       }
