@@ -18,14 +18,15 @@
 package org.apache.carbondata.spark.testsuite.filterexpr
 
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.test.util.QueryTest
 import org.scalatest.BeforeAndAfterAll
+
 import org.apache.carbondata.core.constants.CarbonCommonConstants
 import org.apache.carbondata.core.util.CarbonProperties
-import org.apache.spark.sql.test.util.QueryTest
 
 /**
-  * Test Class for filter expression query on String datatypes
-  */
+ * Test Class for filter expression query on String datatypes
+ */
 class CountStarTestCase extends QueryTest with BeforeAndAfterAll {
 
   override def beforeAll {
@@ -65,10 +66,54 @@ class CountStarTestCase extends QueryTest with BeforeAndAfterAll {
         CarbonCommonConstants.ENABLE_QUERY_STATISTICS_DEFAULT)
   }
 
+  test("select query without filter should not be pruned with multi thread") {
+    val numOfThreadsForPruning = CarbonProperties.getNumOfThreadsForPruning
+    val carbonDriverPruningMultiThreadEnableFilesCount =
+      CarbonProperties.getDriverPruningMultiThreadEnableFilesCount
+    CarbonProperties.getInstance()
+      .addProperty(CarbonCommonConstants.CARBON_MAX_DRIVER_THREADS_FOR_BLOCK_PRUNING, "2")
+    CarbonProperties.getInstance()
+      .addProperty(CarbonCommonConstants.CARBON_DRIVER_PRUNING_MULTI_THREAD_ENABLE_FILES_COUNT, "1")
+    try {
+      sql("CREATE TABLE filtertestTables (ID int, date Timestamp, country String, " +
+        "name String, phonetype String, serialname String, salary int) " +
+        "STORED AS carbondata"
+      )
+      val csvFilePath = s"$resourcesPath/datanullmeasurecol.csv"
+      sql(
+        s"LOAD DATA LOCAL INPATH '" + csvFilePath + "' INTO TABLE " +
+          s"filtertestTables OPTIONS('DELIMITER'= ',', 'FILEHEADER'= '')"
+      )
+      sql(
+        s"LOAD DATA LOCAL INPATH '" + csvFilePath + "' INTO TABLE " +
+          s"filtertestTables OPTIONS('DELIMITER'= ',', 'FILEHEADER'= '')"
+      )
+      checkAnswer(
+        sql("select ID, Country, name, phoneType, serialName from filtertestTables"),
+        Seq(
+          Row(1, "china", "aaa1", "phone197", "A234"),
+          Row(1, "china", "aaa1", "phone197", "A234"),
+          Row(2, "china", "aaa2", "phone756", "A453"),
+          Row(2, "china", "aaa2", "phone756", "A453"))
+      )
+      checkAnswer(
+        sql("select count(*) from filtertestTables"), Seq(Row(4)))
+    } finally {
+      CarbonProperties.getInstance().addProperty(CarbonCommonConstants
+        .CARBON_MAX_DRIVER_THREADS_FOR_BLOCK_PRUNING, numOfThreadsForPruning.toString)
+      CarbonProperties.getInstance().addProperty(CarbonCommonConstants
+        .CARBON_DRIVER_PRUNING_MULTI_THREAD_ENABLE_FILES_COUNT,
+        carbonDriverPruningMultiThreadEnableFilesCount.toString)
+    }
+  }
+
   override def afterAll {
     CarbonProperties.getInstance()
       .addProperty(CarbonCommonConstants.CARBON_TIMESTAMP_FORMAT,
         CarbonCommonConstants.CARBON_TIMESTAMP_DEFAULT_FORMAT)
+      .addProperty(
+        CarbonCommonConstants.ENABLE_QUERY_STATISTICS,
+        CarbonCommonConstants.ENABLE_QUERY_STATISTICS_DEFAULT)
     sql("drop table if exists filtertestTables")
     sql("drop table if exists filterTimestampDataType")
   }

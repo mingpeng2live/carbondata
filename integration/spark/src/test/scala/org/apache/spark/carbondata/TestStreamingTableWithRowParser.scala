@@ -24,9 +24,9 @@ import java.sql.{Date, Timestamp}
 
 import scala.collection.mutable
 
+import org.apache.spark.sql.{CarbonEnv, Row, SparkSession}
 import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.hive.CarbonRelation
-import org.apache.spark.sql.{CarbonEnv, Row, SparkSession}
 import org.apache.spark.sql.streaming.{ProcessingTime, StreamingQuery}
 import org.apache.spark.sql.test.util.QueryTest
 import org.scalatest.BeforeAndAfterAll
@@ -43,7 +43,7 @@ case class StreamData(id: Integer, name: String, city: String, salary: java.lang
     file: FileElement)
 
 class TestStreamingTableWithRowParser extends QueryTest with BeforeAndAfterAll {
-
+  // scalastyle:off lineLength
   private val spark = sqlContext.sparkSession
   private val dataFilePath = s"$resourcesPath/streamSample.csv"
 
@@ -429,12 +429,12 @@ class TestStreamingTableWithRowParser extends QueryTest with BeforeAndAfterAll {
     // check one row of streaming data
     assert(result(0).isNullAt(0))
     assert(result(0).getString(1) == "")
-    assert(result(0).getStruct(9).isNullAt(1))
+    assert(result(0).isNullAt(9))
     // check one row of batch loading
     assert(result(50).getInt(0) == 100000001)
     assert(result(50).getString(1) == "batch_1")
     assert(result(50).getStruct(9).getInt(1) == 20)
-    sql("select * from streaming1.stream_table_filter_complex where id = 1").show
+    sql("select * from streaming1.stream_table_filter_complex where id = 1").collect()
     // filter
     checkAnswer(
       sql("select * from stream_table_filter_complex where id = 1"),
@@ -571,7 +571,7 @@ class TestStreamingTableWithRowParser extends QueryTest with BeforeAndAfterAll {
     checkAnswer(
       sql("select * from stream_table_filter_complex where register between '2010-01-04 10:01:01' and '2010-01-05 10:01:01'"),
       Seq(Row(9, "name_9", "city_9", 90000.0, BigDecimal.valueOf(0.04), 80.04, Date.valueOf("1990-01-04"), Timestamp.valueOf("2010-01-04 10:01:01.0"), Timestamp.valueOf("2010-01-04 10:01:01.0"), Row(wrap(Array("school_9", "school_99")), 9)),
-        Row(100000004, "batch_4", "city_4", 0.4, BigDecimal.valueOf(0.04), 80.04, Date.valueOf("1990-01-04"), Timestamp.valueOf("2010-01-04 10:01:01.0"), Timestamp.valueOf("2010-01-04 10:01:01.0"), Row(wrap(Array("school_4", "school_44")),50)),
+        Row(100000004, "batch_4", "city_4", 0.4, BigDecimal.valueOf(0.04), 80.04, Date.valueOf("1990-01-04"), Timestamp.valueOf("2010-01-04 10:01:01.0"), Timestamp.valueOf("2010-01-04 10:01:01.0"), Row(wrap(Array("school_4", "school_44")), 50)),
         Row(100000005, "batch_5", "city_5", 0.5, BigDecimal.valueOf(0.05), 80.05, Date.valueOf("1990-01-05"), Timestamp.valueOf("2010-01-05 10:01:01.0"), Timestamp.valueOf("2010-01-05 10:01:01.0"), Row(wrap(Array("school_5", "school_55")), 60))))
 
     checkAnswer(
@@ -592,12 +592,12 @@ class TestStreamingTableWithRowParser extends QueryTest with BeforeAndAfterAll {
 
     checkAnswer(
       sql("select * from stream_table_filter_complex where id is null order by name"),
-      Seq(Row(null, "", "", null, null, null, null, null, null, Row(wrap(Array(null)), null)),
+      Seq(Row(null, "", "", null, null, null, null, null, null, null),
         Row(null, "name_6", "city_6", 60000.0, BigDecimal.valueOf(0.01), 80.01, Date.valueOf("1990-01-01"), null, Timestamp.valueOf("2010-01-01 10:01:01.0"), Row(wrap(Array("school_6", "school_66")), 6))))
 
     checkAnswer(
       sql("select * from stream_table_filter_complex where name = ''"),
-      Seq(Row(null, "", "", null, null, null, null, null, null, Row(wrap(Array(null)), null))))
+      Seq(Row(null, "", "", null, null, null, null, null, null, null)))
 
     checkAnswer(
       sql("select * from stream_table_filter_complex where id is null and name <> ''"),
@@ -605,7 +605,7 @@ class TestStreamingTableWithRowParser extends QueryTest with BeforeAndAfterAll {
 
     checkAnswer(
       sql("select * from stream_table_filter_complex where city = ''"),
-      Seq(Row(null, "", "", null, null, null, null, null, null, Row(wrap(Array(null)), null))))
+      Seq(Row(null, "", "", null, null, null, null, null, null, null)))
 
     checkAnswer(
       sql("select * from stream_table_filter_complex where id is null and city <> ''"),
@@ -613,7 +613,7 @@ class TestStreamingTableWithRowParser extends QueryTest with BeforeAndAfterAll {
 
     checkAnswer(
       sql("select * from stream_table_filter_complex where salary is null"),
-      Seq(Row(null, "", "", null, null, null, null, null, null, Row(wrap(Array(null)), null))))
+      Seq(Row(null, "", "", null, null, null, null, null, null, null)))
 
     checkAnswer(
       sql("select * from stream_table_filter_complex where id is null and salary is not null"),
@@ -621,7 +621,7 @@ class TestStreamingTableWithRowParser extends QueryTest with BeforeAndAfterAll {
 
     checkAnswer(
       sql("select * from stream_table_filter_complex where tax is null"),
-      Seq(Row(null, "", "", null, null, null, null, null, null, Row(wrap(Array(null)), null))))
+      Seq(Row(null, "", "", null, null, null, null, null, null, null)))
 
     checkAnswer(
       sql("select * from stream_table_filter_complex where id is null and tax is not null"),
@@ -629,7 +629,7 @@ class TestStreamingTableWithRowParser extends QueryTest with BeforeAndAfterAll {
 
     checkAnswer(
       sql("select * from stream_table_filter_complex where percent is null"),
-      Seq(Row(null, "", "", null, null, null, null, null, null, Row(wrap(Array(null)), null))))
+      Seq(Row(null, "", "", null, null, null, null, null, null, null)))
 
     checkAnswer(
       sql("select * from stream_table_filter_complex where id is null and salary is not null"),
@@ -637,7 +637,7 @@ class TestStreamingTableWithRowParser extends QueryTest with BeforeAndAfterAll {
 
     checkAnswer(
       sql("select * from stream_table_filter_complex where birthday is null"),
-      Seq(Row(null, "", "", null, null, null, null, null, null, Row(wrap(Array(null)), null))))
+      Seq(Row(null, "", "", null, null, null, null, null, null, null)))
 
     checkAnswer(
       sql("select * from stream_table_filter_complex where id is null and birthday is not null"),
@@ -645,7 +645,7 @@ class TestStreamingTableWithRowParser extends QueryTest with BeforeAndAfterAll {
 
     checkAnswer(
       sql("select * from stream_table_filter_complex where register is null"),
-      Seq(Row(null, "", "", null, null, null, null, null, null, Row(wrap(Array(null)), null)),
+      Seq(Row(null, "", "", null, null, null, null, null, null, null),
         Row(null, "name_6", "city_6", 60000.0, BigDecimal.valueOf(0.01), 80.01, Date.valueOf("1990-01-01"), null, Timestamp.valueOf("2010-01-01 10:01:01.0"), Row(wrap(Array("school_6", "school_66")), 6))))
 
     checkAnswer(
@@ -654,7 +654,7 @@ class TestStreamingTableWithRowParser extends QueryTest with BeforeAndAfterAll {
 
     checkAnswer(
       sql("select * from stream_table_filter_complex where updated is null"),
-      Seq(Row(null, "", "", null, null, null, null, null, null, Row(wrap(Array(null)), null))))
+      Seq(Row(null, "", "", null, null, null, null, null, null, null)))
 
     checkAnswer(
       sql("select * from stream_table_filter_complex where id is null and updated is not null"),
@@ -692,9 +692,9 @@ class TestStreamingTableWithRowParser extends QueryTest with BeforeAndAfterAll {
       autoHandoff = false
     )
 
-    sql("SHOW SEGMENTS FOR TABLE streaming1.stream_table_filter_complex").show
+    sql("SHOW SEGMENTS FOR TABLE streaming1.stream_table_filter_complex").collect()
     sql("ALTER TABLE streaming1.stream_table_filter_complex COMPACT 'close_streaming'")
-    sql("SHOW SEGMENTS FOR TABLE streaming1.stream_table_filter_complex").show
+    sql("SHOW SEGMENTS FOR TABLE streaming1.stream_table_filter_complex").collect()
 
   }
 
@@ -930,7 +930,7 @@ class TestStreamingTableWithRowParser extends QueryTest with BeforeAndAfterAll {
       "('HEADER'='true','COMPLEX_DELIMITER_LEVEL_1'='$', 'COMPLEX_DELIMITER_LEVEL_2'=':')")
   }
 
-  def wrap(array: Array[String]) = {
+  private def wrap(array: Array[String]) = {
     new mutable.WrappedArray.ofRef(array)
   }
 
@@ -959,5 +959,5 @@ class TestStreamingTableWithRowParser extends QueryTest with BeforeAndAfterAll {
     } while (retry)
     serverSocket
   }
-
+  // scalastyle:on lineLength
 }

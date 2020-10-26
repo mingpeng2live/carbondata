@@ -14,6 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.carbondata.spark.testsuite.standardpartition
 
 import java.nio.file.{Files, LinkOption, Paths}
@@ -27,7 +28,7 @@ import org.apache.carbondata.core.constants.CarbonCommonConstants
 import org.apache.carbondata.core.util.CarbonProperties
 
 class StandardPartitionTableDropTestCase extends QueryTest with BeforeAndAfterAll {
-
+  // scalastyle:off lineLength
   override def beforeAll {
     dropTable
 
@@ -158,6 +159,38 @@ class StandardPartitionTableDropTestCase extends QueryTest with BeforeAndAfterAl
 
   }
 
+  test("dropping static partition after inserting overwrite partition") {
+    sql("""drop table if exists droppartition""")
+    sql(
+      """CREATE TABLE droppartition (id STRING, sales STRING)
+        | PARTITIONED BY (dtm STRING)
+        | STORED AS carbondata""".stripMargin)
+    sql(
+      s"""load data local inpath '$resourcesPath/IUD/updateinpartition.csv'
+         | into table droppartition""".stripMargin)
+    // insert overwrite an existing partition
+    sql(
+      """insert overwrite table droppartition
+        | partition (dtm=20200908)
+        | select * from droppartition
+        | where dtm = 20200907""".stripMargin)
+    // insert overwrite an non-existing partition
+    sql(
+      """insert overwrite table droppartition
+        | partition (dtm=20200909)
+        | select * from droppartition
+        | where dtm = 20200907""".stripMargin)
+
+    // make sure drop one partition won't effect other partitions
+    sql("""alter table droppartition drop partition (dtm=20200909)""")
+    checkAnswer(
+      sql(s"""select count(*),dtm from droppartition group by dtm"""),
+      Seq(Row(10, "20200907"), Row(10, "20200908")))
+    sql("""alter table droppartition drop partition (dtm=20200907)""")
+    checkAnswer(
+      sql(s"""select count(*),dtm from droppartition group by dtm"""),
+      Seq(Row(10, "20200908")))
+  }
 
   test("dropping all partition on table and do compaction") {
     sql(
@@ -204,12 +237,12 @@ class StandardPartitionTableDropTestCase extends QueryTest with BeforeAndAfterAl
       sql(s"""select count (*) from partitionone1 where empno=11"""),
       sql(s"""select count (*) from originTable where empno=11"""))
     sql(s"""ALTER TABLE partitionone1 DROP PARTITION(empno='11')""")
-    sql(s"CLEAN FILES FOR TABLE partitionone1").show()
+    sql(s"CLEAN FILES FOR TABLE partitionone1").collect()
     assert(Files.notExists(Paths.get(TestQueryExecutor.warehouse + "/partitionone1/" + "empno=11"), LinkOption.NOFOLLOW_LINKS))
     sql("drop table if exists partitionone1")
   }
 
-  override def afterAll = {
+  override def afterAll: Unit = {
     CarbonProperties.getInstance()
       .addProperty(CarbonCommonConstants.CARBON_TIMESTAMP_FORMAT,
         CarbonCommonConstants.CARBON_TIMESTAMP_DEFAULT_FORMAT)
@@ -218,7 +251,7 @@ class StandardPartitionTableDropTestCase extends QueryTest with BeforeAndAfterAl
     dropTable
   }
 
-  def dropTable = {
+  private def dropTable = {
     sql("drop table if exists originTable")
     sql("drop table if exists originMultiLoads")
     sql("drop table if exists partitionone")
@@ -228,6 +261,7 @@ class StandardPartitionTableDropTestCase extends QueryTest with BeforeAndAfterAl
     sql("drop table if exists staticpartition")
     sql("drop table if exists partitionallcompaction")
     sql("drop table if exists partitionone1")
+    sql("drop table if exists droppartition")
   }
-
+  // scalastyle:on lineLength
 }

@@ -24,9 +24,9 @@ import java.util.concurrent.TimeUnit
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
+import scala.concurrent.{Await, Future}
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.Duration
-import scala.concurrent.{Await, Future}
 
 import org.apache.avro
 import org.apache.avro.file.DataFileWriter
@@ -34,27 +34,19 @@ import org.apache.avro.generic.{GenericDatumReader, GenericDatumWriter, GenericR
 import org.apache.avro.io.{DecoderFactory, Encoder}
 import org.apache.commons.io.FileUtils
 import org.apache.commons.lang.RandomStringUtils
-import org.apache.spark.sql.test.util.QueryTest
 import org.apache.spark.sql.{AnalysisException, CarbonEnv, Row}
+import org.apache.spark.sql.test.util.QueryTest
 import org.junit.Assert
 import org.scalatest.BeforeAndAfterAll
 
 import org.apache.carbondata.common.exceptions.sql.MalformedCarbonCommandException
-import org.apache.carbondata.core.cache.dictionary.DictionaryByteArrayWrapper
 import org.apache.carbondata.core.constants.CarbonCommonConstants
-import org.apache.carbondata.core.datastore.block.TableBlockInfo
-import org.apache.carbondata.core.datastore.chunk.impl.DimensionRawColumnChunk
-import org.apache.carbondata.core.datastore.chunk.reader.CarbonDataReaderFactory
-import org.apache.carbondata.core.datastore.chunk.reader.dimension.v3.DimensionChunkReaderV3
-import org.apache.carbondata.core.datastore.compression.CompressorFactory
-import org.apache.carbondata.core.datastore.filesystem.{CarbonFile, CarbonFileFilter}
+import org.apache.carbondata.core.datastore.filesystem.CarbonFile
 import org.apache.carbondata.core.datastore.impl.FileFactory
-import org.apache.carbondata.core.datastore.page.encoding.DefaultEncodingFactory
-import org.apache.carbondata.core.metadata.ColumnarFormatVersion
 import org.apache.carbondata.core.metadata.datatype.{DataTypes, Field}
 import org.apache.carbondata.core.reader.CarbonFooterReaderV3
+import org.apache.carbondata.core.util.{CarbonProperties, CarbonTestUtil, CarbonUtil}
 import org.apache.carbondata.core.util.path.CarbonTablePath
-import org.apache.carbondata.core.util.{CarbonMetadataUtil, CarbonProperties, CarbonUtil, DataFileFooterConverterV3}
 import org.apache.carbondata.processing.loading.exception.CarbonDataLoadingException
 import org.apache.carbondata.sdk.file._
 
@@ -64,7 +56,7 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
   var writerPath = new File(this.getClass.getResource("/").getPath
                             + "../../target/SparkCarbonFileFormat/WriterOutput/")
     .getCanonicalPath
-  //getCanonicalPath gives path with \, but the code expects /.
+  // getCanonicalPath gives path with \, but the code expects /.
   writerPath = writerPath.replace("\\", "/")
 
   def buildTestDataSingleFile(): Any = {
@@ -145,15 +137,20 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
         if (options != null) {
           builder.outputPath(writerPath)
             .sortBy(sortColumns.toArray)
-            .uniqueIdentifier(
-              System.currentTimeMillis).withBlockSize(2).withLoadOptions(options)
-            .withCsvInput(Schema.parseJson(schema)).writtenBy("TestNonTransactionalCarbonTable").build()
+            .uniqueIdentifier(System.currentTimeMillis)
+            .withBlockSize(2)
+            .withLoadOptions(options)
+            .withCsvInput(Schema.parseJson(schema))
+            .writtenBy("TestNonTransactionalCarbonTable")
+            .build()
         } else {
           builder.outputPath(writerPath)
             .sortBy(sortColumns.toArray)
-            .uniqueIdentifier(
-              System.currentTimeMillis).withBlockSize(2)
-            .withCsvInput(Schema.parseJson(schema)).writtenBy("TestNonTransactionalCarbonTable").build()
+            .uniqueIdentifier(System.currentTimeMillis)
+            .withBlockSize(2)
+            .withCsvInput(Schema.parseJson(schema))
+            .writtenBy("TestNonTransactionalCarbonTable")
+            .build()
         }
       var i = 0
       while (i < rows) {
@@ -161,12 +158,14 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
           // writing a bad record
           writer.write(Array[String]( "robot" + i, String.valueOf(i.toDouble / 2), "robot"))
         } else {
-          writer.write(Array[String]("robot" + i, String.valueOf(i), String.valueOf(i.toDouble / 2)))
+          writer.write(Array[String]("robot" + i,
+            String.valueOf(i),
+            String.valueOf(i.toDouble / 2)))
         }
         i += 1
       }
       if ((options != null) && sortColumns.nonEmpty) {
-        //Keep one valid record. else carbon data file will not generate
+        // Keep one valid record. else carbon data file will not generate
         writer.write(Array[String]("robot" + i, String.valueOf(i), String.valueOf(i.toDouble / 2)))
       }
       writer.close()
@@ -217,9 +216,11 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
       val writer =
         builder.outputPath(writerPath)
           .sortBy(sortColumns.toArray)
-          .uniqueIdentifier(
-            123).withBlockSize(2)
-          .withCsvInput(Schema.parseJson(schema)).writtenBy("TestNonTransactionalCarbonTable").build()
+          .uniqueIdentifier(123)
+          .withBlockSize(2)
+          .withCsvInput(Schema.parseJson(schema))
+          .writtenBy("TestNonTransactionalCarbonTable")
+          .build()
       var i = 0
       while (i < rows) {
         writer.write(Array[String]("robot" + i, String.valueOf(i), String.valueOf(i.toDouble / 2)))
@@ -231,7 +232,7 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
     }
   }
 
-  def cleanTestData() = {
+  private def cleanTestData() = {
     FileUtils.deleteDirectory(new File(writerPath))
   }
 
@@ -260,7 +261,7 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
     sql("DROP TABLE IF EXISTS sdkOutputTable")
   }
 
-  test("concurrently insert operation"){
+  test("concurrently insert operation") {
     cleanTestData()
     buildTestDataSingleFile()
     assert(new File(writerPath).exists())
@@ -276,12 +277,12 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
 
     sql("drop table if exists t1")
     sql("create table if not exists t1 (name string, age int, height double) STORED AS carbondata")
-    var i =0
-    while (i<50){
-      sql (s"""insert into t1 values ("aaaaa", 12, 20)""").show(200,false)
-      i = i+1
+    var i = 0
+    while (i<50) {
+      sql(s"""insert into t1 values ("aaaaa", 12, 20)""").collect()
+      i = i + 1
     }
-    checkAnswer(sql("select count(*) from t1"),Seq(Row(50)))
+    checkAnswer(sql("select count(*) from t1"), Seq(Row(50)))
     val one = Future {
       sql("insert into sdkOutputTable select * from t1 ")
     }
@@ -289,9 +290,11 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
       sql("insert into sdkOutputTable select * from t1 ")
     }
 
+    // scalastyle:off awaitresult
     Await.result(Future.sequence(Seq(one, two)), Duration(300, TimeUnit.SECONDS))
+    // scalastyle:on awaitresult
 
-    checkAnswer(sql("select count(*) from sdkOutputTable"),Seq(Row(103)))
+    checkAnswer(sql("select count(*) from sdkOutputTable"), Seq(Row(103)))
 
     sql("DROP TABLE sdkOutputTable")
     // drop table should not delete the files
@@ -353,12 +356,14 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
       Row("robot0", "robot0"),
       Row("robot1", "robot1"),
       Row("robot2", "robot2")))
-    //load csvfile without fileheader
+    // load csvfile without fileheader
     var exception = intercept[CarbonDataLoadingException] {
-      sql(s"""load data inpath '$resourcesPath/nontransactional1.csv' into table sdkOutputTable""").show(200,false)
+      sql(s"load data inpath '$resourcesPath/nontransactional1.csv' into table sdkOutputTable")
+        .collect()
     }
-    assert(exception.getMessage()
-      .contains("CSV header in input file is not proper. Column names in schema and csv header are not the same."))
+    assert(exception.getMessage().contains(
+      "CSV header in input file is not proper. " +
+      "Column names in schema and csv header are not the same."))
 
     sql("DROP TABLE sdkOutputTable")
     // drop table should not delete the files
@@ -386,7 +391,7 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
   }
 
   test("test create external table with sort columns") {
-    buildTestDataWithSortColumns(List("age","name"))
+    buildTestDataWithSortColumns(List("age", "name"))
     assert(new File(writerPath).exists())
     sql("DROP TABLE IF EXISTS sdkOutputTable")
 
@@ -431,7 +436,7 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
          | LOCATION
          |'$writerPath' """.stripMargin)
 
-    checkExistence(sql("describe formatted sdkOutputTable"),false,"Sort Columns name")
+    checkExistence(sql("describe formatted sdkOutputTable"), false, "Sort Columns name")
 
     sql("DROP TABLE sdkOutputTable")
     // drop table should not delete the files
@@ -464,7 +469,8 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
     cleanTestData()
   }
 
-  test("test create External Table with Schema with partition, should ignore schema and partition") {
+  test("test create External Table with Schema with partition, " +
+       "should ignore schema and partition") {
     buildTestDataSingleFile()
     assert(new File(writerPath).exists())
     sql("DROP TABLE IF EXISTS sdkOutputTable")
@@ -503,8 +509,8 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
       Row("robot2", 2, 1.0)))
 
     sql("create table if not exists t1 (name string, age int, height double) STORED AS carbondata")
-    sql (s"""insert into t1 values ("aaaaa", 12, 20)""").show(200,false)
-    sql("insert into sdkOutputTable select * from t1").show(200,false)
+    sql(s"""insert into t1 values ("aaaaa", 12, 20)""").collect()
+    sql("insert into sdkOutputTable select * from t1").collect()
 
     checkAnswer(sql(s"""select * from sdkOutputTable where age = 12"""),
       Seq(Row("aaaaa", 12, 20.0)))
@@ -536,12 +542,12 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
       Row("robot2", 2, 1.0)))
 
     sql("create table if not exists t1 (name string, age int, height double) STORED AS carbondata")
-    sql (s"""insert into t1 values ("aaaaa", 12, 20)""").show(200,false)
+    sql(s"""insert into t1 values ("aaaaa", 12, 20)""").collect()
 
     checkAnswer(sql(s"""select count(*) from sdkOutputTable where age = 1"""),
       Seq(Row(1)))
 
-    sql("insert overwrite table sdkOutputTable select * from t1").show(200,false)
+    sql("insert overwrite table sdkOutputTable select * from t1").collect()
 
     checkAnswer(sql(s"""select count(*) from sdkOutputTable where age = 1"""),
       Seq(Row(0)))
@@ -574,7 +580,7 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
       Row("robot2", 2, 1.0)))
 
     sql("create table if not exists t1 (name string, age int, height double) STORED AS carbondata")
-    sql (s"""insert into t1 values ("aaaaa", 12, 20)""").show(200,false)
+    sql(s"""insert into t1 values ("aaaaa", 12, 20)""").collect()
 
     checkAnswer(sql(s"""select count(*) from sdkOutputTable where age = 1"""),
       Seq(Row(1)))
@@ -672,7 +678,7 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
 
     //4. Show segments
     exception = intercept[MalformedCarbonCommandException] {
-      sql("Show segments for table sdkOutputTable").show(false)
+      sql("Show segments for table sdkOutputTable").collect()
     }
     assert(exception.getMessage()
       .contains("Unsupported operation on non transactional table"))
@@ -693,21 +699,21 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
 
     //7. Update Segment
     exception = intercept[MalformedCarbonCommandException] {
-      sql("UPDATE sdkOutputTable SET (age) = (age + 9) ").show(false)
+      sql("UPDATE sdkOutputTable SET (age) = (age + 9) ").collect()
     }
     assert(exception.getMessage()
       .contains("Unsupported operation on non transactional table"))
 
     //8. Delete Segment
     exception = intercept[MalformedCarbonCommandException] {
-      sql("DELETE FROM sdkOutputTable where name='robot1'").show(false)
+      sql("DELETE FROM sdkOutputTable where name='robot1'").collect()
     }
     assert(exception.getMessage()
       .contains("Unsupported operation on non transactional table"))
 
     //9. Show partition
     val ex = intercept[MalformedCarbonCommandException] {
-      sql("Show partitions sdkOutputTable").show(false)
+      sql("Show partitions sdkOutputTable").collect()
     }
     assert(ex.getMessage()
       .contains("Unsupported operation on non transactional table"))
@@ -1090,7 +1096,7 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
 
     val exception =
       intercept[IOException] {
-        sql("select * from sdkOutputTable").show(false)
+        sql("select * from sdkOutputTable").collect()
       }
     assert(exception.getMessage()
       .contains("Problem in loading segment blocks"))
@@ -1107,11 +1113,11 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
     sql(
       "create table if not exists normalTable1(name string, age int, height double) " +
       "STORED AS carbondata")
-    sql(s"""insert into normalTable1 values ("aaaaa", 12, 20)""").show(200, false)
+    sql(s"""insert into normalTable1 values ("aaaaa", 12, 20)""").collect()
     sql("DROP TABLE IF EXISTS sdkOutputTable")
     val carbonTable = CarbonEnv
       .getCarbonTable(Option("default"), "normalTable1")(sqlContext.sparkSession)
-    sql("describe formatted normalTable1").show(200, false)
+    sql("describe formatted normalTable1").collect()
     val fileLocation = carbonTable.getSegmentPath("0")
     sql(
       s"""CREATE EXTERNAL TABLE sdkOutputTable STORED AS carbondata LOCATION
@@ -1439,8 +1445,8 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
       s"""CREATE EXTERNAL TABLE sdkOutputTable STORED AS carbondata LOCATION
          |'$writerPath' """.stripMargin)
 
-    sql("desc formatted sdkOutputTable").show(false)
-    sql("select * from sdkOutputTable").show(false)
+    sql("desc formatted sdkOutputTable").collect()
+    sql("select * from sdkOutputTable").collect()
 
     /*
     +---+---+----------------------------------------------------+
@@ -1479,7 +1485,7 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
       s"""CREATE EXTERNAL TABLE sdkOutputTable STORED AS carbondata LOCATION
          |'$writerPath' """.stripMargin)
 
-    sql("select * from sdkOutputTable").show(200,false)
+    sql("select * from sdkOutputTable").collect()
 
     checkAnswer(sql("select * from sdkOutputTable"), Seq(
       Row("bob", 10, new mutable.WrappedArray.ofRef[String](Array("abc", "defg"))),
@@ -1544,7 +1550,7 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
       s"""CREATE EXTERNAL TABLE sdkOutputTable STORED AS carbondata LOCATION
          |'$writerPath' """.stripMargin)
 
-    sql("select * from sdkOutputTable").show(200,false)
+    sql("select * from sdkOutputTable").collect()
 
     checkAnswer(sql("select * from sdkOutputTable"), Seq(
       Row("bob", 10, new mutable.WrappedArray.ofRef[String](Array("sc", "ab"))),
@@ -1594,7 +1600,7 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
       s"""CREATE EXTERNAL TABLE sdkOutputTable STORED AS carbondata LOCATION
          |'$writerPath' """.stripMargin)
 
-    sql("select * from sdkOutputTable").show(false)
+    sql("select * from sdkOutputTable").collect()
 
     // TODO: Add a validation
     /*
@@ -1621,13 +1627,13 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
       s"""CREATE EXTERNAL TABLE sdkOutputTable STORED AS carbondata LOCATION
          |'$writerPath' """.stripMargin)
 
-    sql("SELECT name,name FROM sdkOutputTable").show()
+    sql("SELECT name,name FROM sdkOutputTable").collect()
     checkAnswer(sql("SELECT name,name FROM sdkOutputTable"), Seq(
       Row("bob", "bob"),
       Row("bob", "bob"),
       Row("bob", "bob")))
 
-    sql("select * from sdkOutputTable").show(false)
+    sql("select * from sdkOutputTable").collect()
 
     // TODO: Add a validation
     /*
@@ -1737,7 +1743,7 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
       s"""CREATE EXTERNAL TABLE sdkOutputTable STORED AS carbondata LOCATION
          |'$writerPath' """.stripMargin)
 
-    sql("select * from sdkOutputTable").show(false)
+    sql("select * from sdkOutputTable").collect()
 
     // TODO: Add a validation
     /*
@@ -1856,7 +1862,7 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
       s"""CREATE EXTERNAL TABLE sdkOutputTable STORED AS carbondata LOCATION
          |'$writerPath' """.stripMargin)
 
-    sql("select * from sdkOutputTable").show(false)
+    sql("select * from sdkOutputTable").collect()
 
     // TODO: Add a validation
     /*
@@ -1937,7 +1943,7 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
       s"""CREATE EXTERNAL TABLE sdkOutputTable STORED AS carbondata LOCATION
          |'$writerPath' """.stripMargin)
 
-    sql("select * from sdkOutputTable limit 1").show(false)
+    sql("select * from sdkOutputTable limit 1").collect()
 
     // TODO: Add a validation
     /*
@@ -2054,7 +2060,7 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
       s"""CREATE EXTERNAL TABLE sdkOutputTable STORED AS carbondata LOCATION
          |'$writerPath' """.stripMargin)
 
-    sql("select * from sdkOutputTable").show(false)
+    sql("select * from sdkOutputTable").collect()
 
     // TODO: Add a validation
 
@@ -2411,12 +2417,12 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
       .uniqueIdentifier(System.currentTimeMillis).taskNo(System.nanoTime).outputPath(writerPath).writtenBy("TestNonTransactionalCarbonTable")
     generateCarbonData(builder)
     assert(FileFactory.getCarbonFile(writerPath).exists())
-    assert(testUtil.checkForLocalDictionary(testUtil.getDimRawChunk(0,writerPath)))
+    assert(CarbonTestUtil.checkForLocalDictionary(CarbonTestUtil.getDimRawChunk(writerPath, 0)))
     sql("DROP TABLE IF EXISTS sdkTable")
     sql(
       s"""CREATE EXTERNAL TABLE sdkTable STORED AS carbondata LOCATION
          |'$writerPath' """.stripMargin)
-    sql("describe formatted sdkTable").show(100, false)
+    sql("describe formatted sdkTable").collect()
     val descLoc = sql("describe formatted sdkTable").collect
     descLoc.find(_.get(0).toString.contains("Local Dictionary Enabled")) match {
       case Some(row) => assert(row.get(1).toString.contains("true"))
@@ -2438,7 +2444,7 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
       .uniqueIdentifier(System.currentTimeMillis).taskNo(System.nanoTime).outputPath(writerPath).writtenBy("TestNonTransactionalCarbonTable")
     generateCarbonData(builder)
     assert(FileFactory.getCarbonFile(writerPath).exists())
-    assert(testUtil.checkForLocalDictionary(testUtil.getDimRawChunk(0,writerPath)))
+    assert(CarbonTestUtil.checkForLocalDictionary(CarbonTestUtil.getDimRawChunk(writerPath, 0)))
     sql("DROP TABLE IF EXISTS sdkTable")
     sql(
       s"""CREATE EXTERNAL TABLE sdkTable STORED AS carbondata LOCATION
@@ -2456,7 +2462,7 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
       .uniqueIdentifier(System.currentTimeMillis).taskNo(System.nanoTime).outputPath(writerPath).writtenBy("TestNonTransactionalCarbonTable")
     generateCarbonData(builder)
     assert(FileFactory.getCarbonFile(writerPath).exists())
-    assert(!testUtil.checkForLocalDictionary(testUtil.getDimRawChunk(0,writerPath)))
+    assert(!CarbonTestUtil.checkForLocalDictionary(CarbonTestUtil.getDimRawChunk(writerPath, 0)))
     sql("DROP TABLE IF EXISTS sdkTable")
     sql(
       s"""CREATE EXTERNAL TABLE sdkTable STORED AS carbondata LOCATION
@@ -2474,7 +2480,7 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
       .uniqueIdentifier(System.currentTimeMillis).taskNo(System.nanoTime).outputPath(writerPath).writtenBy("TestNonTransactionalCarbonTable")
     generateCarbonData(builder)
     assert(FileFactory.getCarbonFile(writerPath).exists())
-    assert(testUtil.checkForLocalDictionary(testUtil.getDimRawChunk(0,writerPath)))
+    assert(CarbonTestUtil.checkForLocalDictionary(CarbonTestUtil.getDimRawChunk(writerPath, 0)))
     sql("DROP TABLE IF EXISTS sdkTable")
     sql(
       s"""CREATE EXTERNAL TABLE sdkTable STORED AS carbondata LOCATION
@@ -2482,7 +2488,7 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
     FileUtils.deleteDirectory(new File(writerPath))
     sql("insert into sdkTable select 's1','s2',23 ")
     assert(FileFactory.getCarbonFile(writerPath).exists())
-    assert(testUtil.checkForLocalDictionary(testUtil.getDimRawChunk(0,writerPath)))
+    assert(CarbonTestUtil.checkForLocalDictionary(CarbonTestUtil.getDimRawChunk(writerPath, 0)))
     val df = sql("describe formatted sdkTable")
     checkExistence(df, true, "Local Dictionary Enabled true")
     checkAnswer(sql("select count(*) from sdkTable"), Seq(Row(1)))
@@ -2518,7 +2524,7 @@ class TestNonTransactionalCarbonTable extends QueryTest with BeforeAndAfterAll {
       .uniqueIdentifier(System.currentTimeMillis).taskNo(System.nanoTime).outputPath(writerPath).writtenBy("TestNonTransactionalCarbonTable")
     generateCarbonData(builder)
     assert(FileFactory.getCarbonFile(writerPath).exists())
-    assert(testUtil.checkForLocalDictionary(testUtil.getDimRawChunk(0,writerPath)))
+    assert(CarbonTestUtil.checkForLocalDictionary(CarbonTestUtil.getDimRawChunk(writerPath, 0)))
     sql("DROP TABLE IF EXISTS sdkTable")
     sql(
       s"""CREATE EXTERNAL TABLE sdkTable STORED AS carbondata LOCATION
@@ -2617,105 +2623,4 @@ object testUtil{
       writer.close()
     }
   }
-
-  /**
-   * this method returns true if local dictionary is created for all the blocklets or not
-   *
-   * @return
-   */
-  def getDimRawChunk(blockindex: Int,storePath :String): util.ArrayList[DimensionRawColumnChunk] = {
-    val dataFiles = FileFactory.getCarbonFile(storePath)
-      .listFiles(new CarbonFileFilter() {
-        override def accept(file: CarbonFile): Boolean = {
-          if (file.getName
-            .endsWith(CarbonCommonConstants.FACT_FILE_EXT)) {
-            true
-          } else {
-            false
-          }
-        }
-      })
-    val dimensionRawColumnChunks = read(dataFiles(0).getAbsolutePath,
-      blockindex)
-    dimensionRawColumnChunks
-  }
-
-  def read(filePath: String, blockIndex: Int) = {
-    val carbonDataFiles = new File(filePath)
-    val dimensionRawColumnChunks = new
-        util.ArrayList[DimensionRawColumnChunk]
-    val offset = carbonDataFiles.length
-    val converter = new DataFileFooterConverterV3
-    val fileReader = FileFactory.getFileHolder(FileFactory.getFileType(filePath))
-    val actualOffset = fileReader.readLong(carbonDataFiles.getAbsolutePath, offset - 8)
-    val blockInfo = new TableBlockInfo(carbonDataFiles.getAbsolutePath,
-      actualOffset,
-      "0",
-      new Array[String](0),
-      carbonDataFiles.length,
-      ColumnarFormatVersion.V3,
-      null)
-    val dataFileFooter = converter.readDataFileFooter(blockInfo)
-    val blockletList = dataFileFooter.getBlockletList.asScala
-    for (blockletInfo <- blockletList) {
-      val dimensionColumnChunkReader =
-        CarbonDataReaderFactory
-          .getInstance
-          .getDimensionColumnChunkReader(ColumnarFormatVersion.V3,
-            blockletInfo,
-            carbonDataFiles.getAbsolutePath,
-            false).asInstanceOf[DimensionChunkReaderV3]
-      dimensionRawColumnChunks
-        .add(dimensionColumnChunkReader.readRawDimensionChunk(fileReader, blockIndex))
-    }
-    dimensionRawColumnChunks
-  }
-
-  def validateDictionary(rawColumnPage: DimensionRawColumnChunk,
-      data: Array[String]): Boolean = {
-    val local_dictionary = rawColumnPage.getDataChunkV3.local_dictionary
-    if (null != local_dictionary) {
-      val compressorName = CarbonMetadataUtil.getCompressorNameFromChunkMeta(
-        rawColumnPage.getDataChunkV3.getData_chunk_list.get(0).getChunk_meta)
-      val encodings = local_dictionary.getDictionary_meta.encoders
-      val encoderMetas = local_dictionary.getDictionary_meta.getEncoder_meta
-      val encodingFactory = DefaultEncodingFactory.getInstance
-      val decoder = encodingFactory.createDecoder(encodings, encoderMetas, compressorName)
-      val dictionaryPage = decoder
-        .decode(local_dictionary.getDictionary_data, 0, local_dictionary.getDictionary_data.length)
-      val dictionaryMap = new util.HashMap[DictionaryByteArrayWrapper, Integer]
-      val usedDictionaryValues = util.BitSet
-        .valueOf(CompressorFactory.getInstance.getCompressor(compressorName)
-          .unCompressByte(local_dictionary.getDictionary_values))
-      var index = 0
-      var i = usedDictionaryValues.nextSetBit(0)
-      while ( { i >= 0 }) {
-        dictionaryMap
-          .put(new DictionaryByteArrayWrapper(dictionaryPage.getBytes({ index += 1; index - 1 })),
-            i)
-        i = usedDictionaryValues.nextSetBit(i + 1)
-      }
-      for (i <- data.indices) {
-        if (null == dictionaryMap.get(new DictionaryByteArrayWrapper(data(i).getBytes))) {
-          return false
-        }
-      }
-      return true
-    }
-    false
-  }
-
-  def checkForLocalDictionary(dimensionRawColumnChunks: util
-  .List[DimensionRawColumnChunk]): Boolean = {
-    var isLocalDictionaryGenerated = false
-    import scala.collection.JavaConversions._
-    for (dimensionRawColumnChunk <- dimensionRawColumnChunks) {
-      if (dimensionRawColumnChunk.getDataChunkV3
-        .isSetLocal_dictionary) {
-        isLocalDictionaryGenerated = true
-      }
-    }
-    isLocalDictionaryGenerated
-  }
-
 }

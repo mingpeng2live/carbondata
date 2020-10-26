@@ -49,6 +49,10 @@ public class SliceStreamReader extends CarbonColumnVectorImpl implements PrestoV
 
   private boolean isLocalDict;
 
+  private int positionCount;
+
+  private boolean isLocalDictEnabledForComplextype;
+
   public SliceStreamReader(int batchSize, DataType dataType) {
     super(batchSize, dataType);
     this.batchSize = batchSize;
@@ -66,7 +70,8 @@ public class SliceStreamReader extends CarbonColumnVectorImpl implements PrestoV
       } else {
         dataArray = (int[]) getDataArray();
       }
-      return new DictionaryBlock(batchSize, dictionaryBlock, dataArray);
+      positionCount = isLocalDictEnabledForComplextype ? positionCount : batchSize;
+      return new DictionaryBlock(positionCount, dictionaryBlock, dataArray);
     }
   }
 
@@ -103,6 +108,16 @@ public class SliceStreamReader extends CarbonColumnVectorImpl implements PrestoV
   }
 
   @Override
+  public void setPositionCount(int positionCount) {
+    this.positionCount = positionCount;
+  }
+
+  @Override
+  public void setIsLocalDictEnabledForComplextype(boolean value) {
+    this.isLocalDictEnabledForComplextype = value;
+  }
+
+  @Override
   public void setBatchSize(int batchSize) {
     this.batchSize = batchSize;
   }
@@ -121,6 +136,17 @@ public class SliceStreamReader extends CarbonColumnVectorImpl implements PrestoV
   public void putByteArray(int rowId, int count, byte[] value) {
     for (int i = 0; i < count; i++) {
       type.writeSlice(builder, wrappedBuffer(value));
+    }
+  }
+
+  @Override
+  public void putAllByteArray(byte[] data, int offset, int length) {
+    int[] lengths = getLengths();
+    int[] offsets = getOffsets();
+    for (int i = 0; i < lengths.length; i++) {
+      if (offsets[i] != 0) {
+        putByteArray(i, offsets[i], lengths[i], data);
+      }
     }
   }
 

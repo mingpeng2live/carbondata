@@ -2409,10 +2409,12 @@ public final class CarbonUtil {
           LOGGER.error("Not able to acquire the lock for Table status update for table");
         }
       } finally {
-        if (carbonLock.unlock()) {
-          LOGGER.debug("Table unlocked successfully after table status update");
-        } else {
-          LOGGER.error("Unable to unlock Table lock for table during table status update");
+        if (updateSize) {
+          if (carbonLock.unlock()) {
+            LOGGER.debug("Table unlocked successfully after table status update");
+          } else {
+            LOGGER.error("Unable to unlock Table lock for table during table status update");
+          }
         }
       }
     }
@@ -3252,14 +3254,13 @@ public final class CarbonUtil {
   public static CarbonFile createTempFolderForIndexServer(String queryId)
           throws IOException {
     final String path = getIndexServerTempPath();
+    if (!FileFactory.isFileExist(path)) {
+      // Create the new index server temp directory if it does not exist
+      LOGGER.info("Creating Index Server temp folder:" + path);
+      FileFactory.createDirectoryAndSetPermission(path,
+              new FsPermission(FsAction.ALL, FsAction.ALL, FsAction.ALL));
+    }
     if (queryId == null) {
-      if (!FileFactory.isFileExist(path)) {
-        // Create the new index server temp directory if it does not exist
-        LOGGER.info("Creating Index Server temp folder:" + path);
-        FileFactory
-                .createDirectoryAndSetPermission(path,
-                        new FsPermission(FsAction.ALL, FsAction.ALL, FsAction.ALL));
-      }
       return null;
     }
     CarbonFile file = FileFactory.getCarbonFile(path + CarbonCommonConstants.FILE_SEPARATOR

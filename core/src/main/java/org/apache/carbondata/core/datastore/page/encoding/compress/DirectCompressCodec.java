@@ -28,6 +28,8 @@ import java.util.Map;
 import org.apache.carbondata.core.constants.CarbonCommonConstants;
 import org.apache.carbondata.core.datastore.ReusableDataBuffer;
 import org.apache.carbondata.core.datastore.TableSpec;
+import org.apache.carbondata.core.datastore.chunk.impl.VariableLengthDimensionColumnPage;
+import org.apache.carbondata.core.datastore.chunk.store.DimensionChunkStoreFactory;
 import org.apache.carbondata.core.datastore.compression.Compressor;
 import org.apache.carbondata.core.datastore.compression.CompressorFactory;
 import org.apache.carbondata.core.datastore.page.ColumnPage;
@@ -277,6 +279,11 @@ public class DirectCompressCodec implements ColumnPageCodec {
         vector = ColumnarVectorWrapperDirectFactory
             .getDirectVectorWrapperFactory(vectorInfo, parentVector, vectorInfo.invertedIndex,
                 nullBits, vectorInfo.deletedRows, true, false);
+        // In case of update there will be two wrappers enclosing columnVector
+        if (vector.getColumnVector() != null
+            && vector.getColumnVector().getColumnVector() != null) {
+          vector = vector.getColumnVector();
+        }
         fillVectorBasedOnType(pageData, vector, vectorDataType, pageDataType, pageSize,
             vectorInfo, nullBits);
       } else {
@@ -320,6 +327,20 @@ public class DirectCompressCodec implements ColumnPageCodec {
       int intSizeInBytes = DataTypes.INT.getSizeInBytes();
       int shortSizeInBytes = DataTypes.SHORT.getSizeInBytes();
       int lengthStoredInBytes;
+      // check if local dictionary is enabled for complex primitve type
+      if (!vectorInfo.vectorStack.isEmpty()) {
+        CarbonColumnVectorImpl tempVector =
+            (CarbonColumnVectorImpl) (vectorInfo.vectorStack.peek().getColumnVector());
+        if (tempVector.getLocalDictionary() != null) {
+          DimensionChunkStoreFactory.DimensionStoreType dimStoreType =
+              DimensionChunkStoreFactory.DimensionStoreType.LOCAL_DICT;
+          // This will call fillVector() for local-dict eventually
+          new VariableLengthDimensionColumnPage(pageData, new int[0], new int[0], pageSize,
+              dimStoreType, tempVector.getLocalDictionary(), vectorInfo, pageSize);
+          return;
+        }
+      }
+
       if (vectorInfo.encodings != null && vectorInfo.encodings.size() > 0 && CarbonUtil
           .hasEncoding(vectorInfo.encodings, Encoding.INT_LENGTH_COMPLEX_CHILD_BYTE_ARRAY)) {
         lengthStoredInBytes = intSizeInBytes;
@@ -483,11 +504,11 @@ public class DirectCompressCodec implements ColumnPageCodec {
                 length = ByteBuffer.wrap(pageData, offset, lengthStoredInBytes).getShort();
               }
               offset += lengthStoredInBytes;
-              int surrogateInternal =
-                  ByteUtil.toXorInt(pageData, offset, intSizeInBytes);
               if (length == 0) {
                 vector.putObject(0, null);
               } else {
+                // Calculating surrogate only in case of non-null values
+                int surrogateInternal = ByteUtil.toXorInt(pageData, offset, intSizeInBytes);
                 vector.putObject(0, surrogateInternal - DateDirectDictionaryGenerator.cutOffDate);
               }
               offset += length;

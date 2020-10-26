@@ -61,8 +61,32 @@ class TestArrayContainsPushDown extends QueryTest with BeforeAndAfterAll {
     checkAnswer(sql(" select count(*) from complex1 where array_contains(arr,'sd')"), Seq(Row(2)))
     // test for empty
     checkAnswer(sql(" select * from complex1 where array_contains(arr,'')"),
-      Seq(Row(mutable.WrappedArray.make(Array("ghsf", "dbv","","ty")))))
+      Seq(Row(mutable.WrappedArray.make(Array("ghsf", "dbv", "", "ty")))))
 
+    sql("drop table complex1")
+  }
+
+  test("test array contains push down using limit " +
+       "in row level scan when order by column is sort column") {
+    sql("drop table if exists complex1")
+
+    sql("create table complex1 (id int, arr array<String>) " +
+        "stored as carbondata TBLPROPERTIES ('SORT_COLUMNS'='id')")
+    sql("insert into complex1 select 1, array('as') union all " +
+        "select 2, array('sd','df','gh') union all " +
+        "select 3, array('rt','ew','rtyu','jk',null) union all " +
+        "select 4, array('ghsf','dbv','','ty') union all " +
+        "select 5, array('hjsd','fggb','nhj','sd','asd')")
+
+    // enable the property
+    CarbonProperties.getInstance()
+      .addProperty("carbon.mapOrderPushDown.default_complex1.column", "id")
+    // check for CarbonTakeOrderedAndProjectExec node in plan
+    checkExistence(sql(
+      " explain select * from complex1 where array_contains(arr,'sd') order by id limit 1"),
+      true,
+      "CarbonTakeOrderedAndProjectExec")
+    CarbonProperties.getInstance().removeProperty("carbon.mapOrderPushDown.default_complex1.column")
     sql("drop table complex1")
   }
 
@@ -177,11 +201,13 @@ class TestArrayContainsPushDown extends QueryTest with BeforeAndAfterAll {
         "select array(3.3, 4.4, 2.2) union all " +
         "select array(-2.2, 3.3, 4.4)")
 
-    checkExistence(sql(" explain select * from complex1 where array_contains(arr,cast(2.2 as double))"),
+    checkExistence(
+      sql(" explain select * from complex1 where array_contains(arr,cast(2.2 as double))"),
       true,
       "PushedFilters: [*EqualTo(arr,2.2)]")
 
-    checkExistence(sql(" explain select count(*) from complex1 where array_contains(arr,cast(2.2 as double))"),
+    checkExistence(
+      sql(" explain select count(*) from complex1 where array_contains(arr,cast(2.2 as double))"),
       true,
       "PushedFilters: [*EqualTo(arr,2.2)]")
 
@@ -189,7 +215,8 @@ class TestArrayContainsPushDown extends QueryTest with BeforeAndAfterAll {
       Seq(Row(mutable.WrappedArray.make(Array(2.2))),
         Row(mutable.WrappedArray.make(Array(3.3, 4.4, 2.2)))))
 
-    checkAnswer(sql(" select count(*) from complex1 where array_contains(arr,cast(2.2 as double))"), Seq(Row(2)))
+    checkAnswer(sql(" select count(*) from complex1 where array_contains(arr,cast(2.2 as double))"),
+      Seq(Row(2)))
     sql("drop table complex1")
   }
 
@@ -201,11 +228,14 @@ class TestArrayContainsPushDown extends QueryTest with BeforeAndAfterAll {
         "select array(3.3, 4.4, 2.2) union all " +
         "select array(-2.2, 3.3, 4.4)")
 
-    checkExistence(sql(" explain select * from complex1 where array_contains(arr,cast(2.2 as decimal(5,2)))"),
+    checkExistence(
+      sql(" explain select * from complex1 where array_contains(arr,cast(2.2 as decimal(5,2)))"),
       true,
       "PushedFilters: [*EqualTo(arr,2.20)]")
 
-    checkExistence(sql(" explain select count(*) from complex1 where array_contains(arr,cast(2.2 as decimal(5,2)))"),
+    checkExistence(
+      sql("explain select count(*) from complex1 " +
+          "where array_contains(arr,cast(2.2 as decimal(5,2)))"),
       true,
       "PushedFilters: [*EqualTo(arr,2.20)]")
 
@@ -216,29 +246,42 @@ class TestArrayContainsPushDown extends QueryTest with BeforeAndAfterAll {
           java.math.BigDecimal.valueOf(4.40).setScale(2),
           java.math.BigDecimal.valueOf(2.20).setScale(2))))))
 
-    checkAnswer(sql(" select count(*) from complex1 where array_contains(arr,cast(2.2 as decimal(5,2)))"), Seq(Row(2)))
+    checkAnswer(
+      sql(" select count(*) from complex1 where array_contains(arr,cast(2.2 as decimal(5,2)))"),
+      Seq(Row(2)))
     sql("drop table complex1")
   }
 
   test("test array contains pushdown for array of timestamp") {
     sql("drop table if exists complex1")
     sql("create table complex1 (arr array<timestamp>) stored as carbondata")
-    sql("insert into complex1 select array('2017-01-01 00:00:00','2018-01-01 00:00:00') union all " +
+    sql("insert into complex1 " +
+        "select array('2017-01-01 00:00:00','2018-01-01 00:00:00') union all " +
         "select array('2019-01-01 00:00:00') union all " +
         "select array('2018-01-01 00:00:00') ")
-    checkExistence(sql(" explain select * from complex1 where array_contains(arr,cast('2018-01-01 00:00:00' as timestamp))"),
+    checkExistence(
+      sql("explain select * from complex1 " +
+          "where array_contains(arr,cast('2018-01-01 00:00:00' as timestamp))"),
       true,
       "PushedFilters: [*EqualTo(arr,1514793600000000)]")
 
-    checkExistence(sql(" explain select count(*) from complex1 where array_contains(arr,cast('2018-01-01 00:00:00' as timestamp))"),
+    checkExistence(
+      sql("explain select count(*) from complex1 " +
+          "where array_contains(arr,cast('2018-01-01 00:00:00' as timestamp))"),
       true,
       "PushedFilters: [*EqualTo(arr,1514793600000000)]")
 
-    checkAnswer(sql(" select * from complex1 where array_contains(arr,cast('2018-01-01 00:00:00' as timestamp))"),
-      Seq(Row(mutable.WrappedArray.make(Array(Timestamp.valueOf("2017-01-01 00:00:00.0"),Timestamp.valueOf("2018-01-01 00:00:00.0")))),
+    checkAnswer(
+      sql("select * from complex1 " +
+          "where array_contains(arr,cast('2018-01-01 00:00:00' as timestamp))"),
+      Seq(Row(mutable.WrappedArray.make(Array(Timestamp.valueOf("2017-01-01 00:00:00.0"),
+        Timestamp.valueOf("2018-01-01 00:00:00.0")))),
         Row(mutable.WrappedArray.make(Array(Timestamp.valueOf("2018-01-01 00:00:00.0"))))))
 
-    checkAnswer(sql(" select count(*) from complex1 where array_contains(arr,cast('2018-01-01 00:00:00' as timestamp))"), Seq(Row(2)))
+    checkAnswer(
+      sql("select count(*) from complex1 " +
+          "where array_contains(arr,cast('2018-01-01 00:00:00' as timestamp))"),
+      Seq(Row(2)))
     sql("drop table complex1")
   }
 
@@ -249,19 +292,25 @@ class TestArrayContainsPushDown extends QueryTest with BeforeAndAfterAll {
         "select array('2019-01-01') union all " +
         "select array('2018-01-01') ")
 
-    checkExistence(sql(" explain select * from complex1 where array_contains(arr,cast('2018-01-01' as date))"),
+    checkExistence(
+      sql("explain select * from complex1 where array_contains(arr,cast('2018-01-01' as date))"),
       true,
       "PushedFilters: [*EqualTo(arr,17532)]")
 
-    checkExistence(sql(" explain select count(*) from complex1 where array_contains(arr,cast('2018-01-01' as date))"),
+    checkExistence(
+      sql("explain select count(*) from complex1 " +
+          "where array_contains(arr,cast('2018-01-01' as date))"),
       true,
       "PushedFilters: [*EqualTo(arr,17532)]")
 
     checkAnswer(sql(" select * from complex1 where array_contains(arr,cast('2018-01-01' as date))"),
-      Seq(Row(mutable.WrappedArray.make(Array(Date.valueOf("2017-01-01"),Date.valueOf("2018-01-01")))),
+      Seq(Row(mutable.WrappedArray.make(
+        Array(Date.valueOf("2017-01-01"), Date.valueOf("2018-01-01")))),
         Row(mutable.WrappedArray.make(Array(Date.valueOf("2018-01-01"))))))
 
-    checkAnswer(sql(" select count(*) from complex1 where array_contains(arr,cast('2018-01-01' as date))"), Seq(Row(2)))
+    checkAnswer(
+      sql("select count(*) from complex1 where array_contains(arr,cast('2018-01-01' as date))"),
+      Seq(Row(2)))
     sql("drop table complex1")
   }
 }
