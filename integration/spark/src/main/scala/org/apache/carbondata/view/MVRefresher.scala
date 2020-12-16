@@ -24,7 +24,7 @@ import scala.collection.JavaConverters._
 
 import com.google.gson.Gson
 import org.apache.log4j.Logger
-import org.apache.spark.sql.{CarbonUtils, SparkSession}
+import org.apache.spark.sql.{CarbonThreadUtil, SparkSession}
 import org.apache.spark.sql.execution.command.management.CarbonInsertIntoCommand
 import org.apache.spark.sql.parser.MVQueryParser
 
@@ -65,8 +65,6 @@ object MVRefresher {
       viewSchema.getIdentifier.getTableId)
     val viewIdentifier = viewSchema.getIdentifier
     val viewTableIdentifier = viewTable.getAbsoluteTableIdentifier
-    // Clean up the old invalid segment data before creating a new entry for new load.
-    SegmentStatusManager.deleteLoadsAndUpdateMetadata(viewTable, false, null)
     val segmentStatusManager: SegmentStatusManager = new SegmentStatusManager(viewTableIdentifier)
     // Acquire table status lock to handle concurrent data loading
     val lock: ICarbonLock = segmentStatusManager.getTableStatusLock
@@ -200,12 +198,7 @@ object MVRefresher {
           viewManager.setStatus(viewSchema.getIdentifier, MVStatus.DISABLED)
           LOGGER.error("Data Load failed for mv: ", exception)
           CarbonLoaderUtil.updateTableStatusInCaseOfFailure(
-            newLoadName,
-            viewTable.getAbsoluteTableIdentifier,
-            viewTable.getTableName,
-            viewTable.getDatabaseName,
-            viewTable.getTablePath,
-            viewTable.getMetadataPath)
+            newLoadName, viewTable, SegmentStatus.INSERT_IN_PROGRESS)
           throw exception
       } finally {
         unsetInputSegments(viewSchema)
@@ -379,7 +372,7 @@ object MVRefresher {
    */
   private def setInputSegments(tableUniqueName: String,
       mainTableSegmentList: java.util.List[String]): Unit = {
-    CarbonUtils
+    CarbonThreadUtil
       .threadSet(CarbonCommonConstants.CARBON_INPUT_SEGMENTS +
                  tableUniqueName, mainTableSegmentList.asScala.mkString(","))
   }
@@ -387,7 +380,7 @@ object MVRefresher {
   private def unsetInputSegments(schema: MVSchema): Unit = {
     val relatedTableIdentifiers = schema.getRelatedTables
     for (relationIdentifier <- relatedTableIdentifiers.asScala) {
-      CarbonUtils
+      CarbonThreadUtil
         .threadUnset(CarbonCommonConstants.CARBON_INPUT_SEGMENTS +
                      relationIdentifier.getDatabaseName + "." +
                      relationIdentifier.getTableName)

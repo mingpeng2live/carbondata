@@ -285,9 +285,10 @@ CarbonData DDL statements are documented here,which includes:
    - ##### Table Compaction Configuration
    
      These properties are table level compaction configurations, if not specified, system level configurations in carbon.properties will be used.
-     Following are 5 configurations:
+     Following are 6 configurations:
      
      * MAJOR_COMPACTION_SIZE: same meaning as carbon.major.compaction.size, size in MB.
+     * MINOR_COMPACTION_SIZE: same meaning as carbon.minor.compaction.size, size in MB.
      * AUTO_LOAD_MERGE: same meaning as carbon.enable.auto.load.merge.
      * COMPACTION_LEVEL_THRESHOLD: same meaning as carbon.compaction.level.threshold.
      * COMPACTION_PRESERVE_SEGMENTS: same meaning as carbon.numberof.preserve.segments.
@@ -295,6 +296,7 @@ CarbonData DDL statements are documented here,which includes:
 
      ```
      TBLPROPERTIES ('MAJOR_COMPACTION_SIZE'='2048',
+                    'MINOR_COMPACTION_SIZE'='4096',
                     'AUTO_LOAD_MERGE'='true',
                     'COMPACTION_LEVEL_THRESHOLD'='5,6',
                     'COMPACTION_PRESERVE_SEGMENTS'='10',
@@ -915,8 +917,6 @@ Users can specify which columns to include and exclude for local dictionary gene
 
 ## PARTITION
 
-### STANDARD PARTITION
-
   The partition is similar as spark and hive partition, user can use any column to build partition:
 
 #### Create Partition Table
@@ -985,7 +985,6 @@ Users can specify which columns to include and exclude for local dictionary gene
   WHERE au.country = 'US';
   ```
 
-
 ### Show Partitions
 
   The following command is executed to get the partition information of the table
@@ -998,12 +997,6 @@ Users can specify which columns to include and exclude for local dictionary gene
 
   ```
   ALTER TABLE [db_name].table_name ADD PARTITION('new_partition')
-  ```
-
-### Split a partition
-
-  ```
-  ALTER TABLE [db_name].table_name SPLIT PARTITION(partition_id) INTO('new_partition1', 'new_partition2'...)
   ```
 
 ### Drop a partition

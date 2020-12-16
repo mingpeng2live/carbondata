@@ -20,19 +20,11 @@ import org.apache.spark.sql.SparkSession
 
 import org.apache.carbondata.core.metadata.schema.table.CarbonTable
 
-/**
- *
- * @param carbonTable
- * @param sparkSession
- */
 case class CleanFilesPreEvent(carbonTable: CarbonTable, sparkSession: SparkSession)
   extends Event with CleanFilesEventInfo
 
-
-/**
- *
- * @param carbonTable
- * @param sparkSession
- */
-case class CleanFilesPostEvent(carbonTable: CarbonTable, sparkSession: SparkSession)
+case class CleanFilesPostEvent(
+    carbonTable: CarbonTable,
+    sparkSession: SparkSession,
+    options: Map[String, String])
   extends Event with CleanFilesEventInfo

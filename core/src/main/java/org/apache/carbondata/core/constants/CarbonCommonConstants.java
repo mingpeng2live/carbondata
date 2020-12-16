@@ -495,6 +495,8 @@ public final class CarbonCommonConstants {
   public static final String INVERTED_INDEX = "inverted_index";
   // table property name of major compaction size
   public static final String TABLE_MAJOR_COMPACTION_SIZE = "major_compaction_size";
+  // table property name of minor compaction size
+  public static final String TABLE_MINOR_COMPACTION_SIZE = "minor_compaction_size";
   // table property name of auto load merge
   public static final String TABLE_AUTO_LOAD_MERGE = "auto_load_merge";
   // table property name of compaction level threshold
@@ -737,6 +739,12 @@ public final class CarbonCommonConstants {
   public static final String CARBON_MAJOR_COMPACTION_SIZE = "carbon.major.compaction.size";
 
   /**
+   * Size of Minor Compaction in MBs
+   */
+  @CarbonProperty(dynamicConfigurable = true)
+  public static final String CARBON_MINOR_COMPACTION_SIZE = "carbon.minor.compaction.size";
+
+  /**
    * By default size of major compaction in MBs.
    */
   public static final String DEFAULT_CARBON_MAJOR_COMPACTION_SIZE = "1024";
@@ -807,19 +815,6 @@ public final class CarbonCommonConstants {
    * Upper limit for the number of segment compacted per time
    */
   public static final int NUMBER_OF_SEGMENT_COMPACTED_PERTIME_UPPER_LIMIT = 10000;
-
-  /**
-   * Number of Update Delta files which is the Threshold for IUD compaction.
-   * Only accepted Range is 0 - 10000. Outside this range system will pick default value.
-   */
-  @CarbonProperty
-  public static final String UPDATE_DELTAFILE_COUNT_THRESHOLD_IUD_COMPACTION =
-      "carbon.horizontal.update.compaction.threshold";
-
-  /**
-   * Default count of segments which act as a threshold for IUD compaction merge.
-   */
-  public static final String DEFAULT_UPDATE_DELTAFILE_COUNT_THRESHOLD_IUD_COMPACTION = "1";
 
   /**
    * Number of Delete Delta files which is the Threshold for IUD compaction.
@@ -1428,6 +1423,34 @@ public final class CarbonCommonConstants {
   public static final String BITSET_PIPE_LINE_DEFAULT = "true";
 
   /**
+   * this is the user defined time(in days), timestamp subfolders in trash directory will take
+   * this value as retention time. They are deleted after this time.
+   */
+  @CarbonProperty
+  public static final String CARBON_TRASH_RETENTION_DAYS = "carbon.trash.retention.days";
+
+  /**
+   * Default retention time of a subdirectory in trash folder is 7 days.
+   */
+  public static final String CARBON_TRASH_RETENTION_DAYS_DEFAULT = "7";
+
+  /**
+   * Maximum allowed retention time of a subdirectory in trash folder is 365 days.
+   */
+  public static final int CARBON_TRASH_RETENTION_DAYS_MAXIMUM = 365;
+
+  /**
+   * User defined property to check if clean files operation with force option is allowed.
+   */
+  @CarbonProperty
+  public static final String CARBON_CLEAN_FILES_FORCE_ALLOWED = "carbon.clean.file.force.allowed";
+
+  /**
+   * By default clean files operation with force option is not allowed.
+   */
+  public static final String CARBON_CLEAN_FILES_FORCE_ALLOWED_DEFAULT = "false";
+
+  /**
    * minimum required registered resource for starting block distribution
    */
   @CarbonProperty
@@ -1774,11 +1797,6 @@ public final class CarbonCommonConstants {
    * DELETE_DELTA_FILE_EXT
    */
   public static final String DELETE_DELTA_FILE_EXT = ".deletedelta";
-
-  /**
-   * UPDATE_DELTA_FILE_EXT
-   */
-  public static final String UPDATE_DELTA_FILE_EXT = FACT_FILE_EXT;
 
   /**
    * MERGERD_EXTENSION
@@ -2521,11 +2539,6 @@ public final class CarbonCommonConstants {
    * INDEX_STATUS defines the status of index. (Enabled / Disabled)
    */
   public static final String INDEX_STATUS = "index_status";
-
-  /**
-   * property which defines the insert stage flow
-   */
-  public static final String IS_INSERT_STAGE = "is_insert_stage";
 
   /**
    * index server temp folder aging period

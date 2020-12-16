@@ -87,10 +87,6 @@ case class CarbonInsertIntoWithDf(databaseNameOp: Option[String],
       options = options)
     val (timeStampFormat, dateFormat) = CommonLoadUtils.getTimeAndDateFormatFromLoadModel(
       carbonLoadModel)
-    // Delete stale segment folders that are not in table status but are physically present in
-    // the Fact folder
-    LOGGER.info(s"Deleting stale folders if present for table $dbName.$tableName")
-    TableProcessingOperations.deletePartialLoadDataIfExist(table, false)
     var isUpdateTableStatusRequired = false
     val uuid = ""
     try {
@@ -107,12 +103,10 @@ case class CarbonInsertIntoWithDf(databaseNameOp: Option[String],
           updateModel = updateModel,
           operationContext = operationContext)
 
-      // Clean up the old invalid segment data before creating a new entry for new load.
-      SegmentStatusManager.deleteLoadsAndUpdateMetadata(table, false, currPartitions)
       // add the start entry for the new load in the table status file
-      if ((updateModel.isEmpty || updateModel.isDefined && updateModel.get.loadAsNewSegment)
+      if ((updateModel.isEmpty || updateModel.isDefined)
           && !table.isHivePartitionTable) {
-        if (updateModel.isDefined ) {
+        if (updateModel.isDefined) {
           carbonLoadModel.setFactTimeStamp(updateModel.get.updatedTimeStamp)
         }
         CarbonLoaderUtil.readAndUpdateLoadProgressInTableMeta(
@@ -154,6 +148,9 @@ case class CarbonInsertIntoWithDf(databaseNameOp: Option[String],
 
       LOGGER.info("Sort Scope : " + carbonLoadModel.getSortScope)
       val (rows, loadResult) = insertData(loadParams)
+      if (updateModel.isDefined) {
+        updateModel.get.insertedSegment = Some(carbonLoadModel.getSegmentId)
+      }
       val info = CommonLoadUtils.makeAuditInfo(loadResult)
       CommonLoadUtils.firePostLoadEvents(sparkSession,
         carbonLoadModel,
@@ -186,11 +183,7 @@ case class CarbonInsertIntoWithDf(databaseNameOp: Option[String],
 
   def insertData(loadParams: CarbonLoadParams): (Seq[Row], LoadMetadataDetails) = {
     var rows = Seq.empty[Row]
-    val loadDataFrame = if (updateModel.isDefined && !updateModel.get.loadAsNewSegment) {
-      Some(CommonLoadUtils.getDataFrameWithTupleID(Some(dataFrame)))
-    } else {
-      Some(dataFrame)
-    }
+    val loadDataFrame = Some(dataFrame)
     val table = loadParams.carbonLoadModel.getCarbonDataLoadSchema.getCarbonTable
     var loadResult : LoadMetadataDetails = null
     loadParams.dataFrame = loadDataFrame

@@ -27,6 +27,7 @@ CarbonData DML statements are documented here,which includes:
 * [UPDATE AND DELETE](#update-and-delete)
 * [COMPACTION](#compaction)
 * [SEGMENT MANAGEMENT](./segment-management-on-carbondata.md)
+* [CLEAN FILES](clean-files.md)
 
 
 ## LOAD DATA
@@ -529,6 +530,11 @@ CarbonData DML statements are documented here,which includes:
   * Level 1: Merging of the segments which are not yet compacted.
   * Level 2: Merging of the compacted segments again to form a larger segment.
 
+  The segment whose data size exceed the limit of carbon.minor.compaction.size will not be included
+  in minor compaction. User can control the size of a segment to be included in the minor
+  compaction by using carbon.minor.compaction.size. If not configured, minor compaction will
+  consider the segments based on carbon.compaction.level.threshold by neglecting the size of
+  each segment.
   ```
   ALTER TABLE table_name COMPACT 'MINOR'
   ```

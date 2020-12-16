@@ -43,6 +43,8 @@ class DeleteCarbonTableTestCase extends QueryTest with BeforeAndAfterAll {
         |AS carbondata""".stripMargin)
     sql(s"""LOAD DATA LOCAL INPATH '$resourcesPath/IUD/source2.csv' INTO table iud_db.source2""")
     sql("use iud_db")
+    CarbonProperties.getInstance()
+      .addProperty(CarbonCommonConstants.CARBON_CLEAN_FILES_FORCE_ALLOWED, "true")
   }
 
   test("delete data from carbon table with alias [where clause ]") {
@@ -201,9 +203,9 @@ class DeleteCarbonTableTestCase extends QueryTest with BeforeAndAfterAll {
     sql("insert into select_after_clean select 3,'uhj'")
     sql("insert into select_after_clean select 4,'frg'")
     sql("alter table select_after_clean compact 'minor'")
-    sql("clean files for table select_after_clean")
+    sql("clean files for table select_after_clean options('force'='true')")
     sql("delete from select_after_clean where name='def'")
-    sql("clean files for table select_after_clean")
+    sql("clean files for table select_after_clean options('force'='true')")
     assertResult(false)(new File(
       CarbonTablePath.getSegmentPath(s"$storeLocation/iud_db.db/select_after_clean", "0")).exists())
     checkAnswer(sql("""select * from select_after_clean"""),
@@ -360,6 +362,55 @@ class DeleteCarbonTableTestCase extends QueryTest with BeforeAndAfterAll {
     sql("drop table if exists decimal_table")
   }
 
+  test("delete and insert overwrite partition") {
+    sql("""drop table if exists deleteinpartition""")
+    sql(
+      """CREATE TABLE deleteinpartition (id STRING, sales STRING)
+        | PARTITIONED BY (dtm STRING)
+        | STORED AS carbondata""".stripMargin)
+    sql(
+      s"""load data local inpath '$resourcesPath/IUD/updateinpartition.csv'
+         | into table deleteinpartition""".stripMargin)
+    sql("""delete from deleteinpartition where dtm=20200907 and id='001'""")
+    sql("""delete from deleteinpartition where dtm=20200907 and id='002'""")
+    checkAnswer(
+      sql("""select count(1), dtm from deleteinpartition group by dtm"""),
+      Seq(Row(8, "20200907"), Row(10, "20200908"))
+    )
+
+    // insert overwrite an partition which is exist.
+    // make sure the delete executed before still works.
+    sql(
+      """insert overwrite table deleteinpartition
+        | partition (dtm=20200908)
+        | select * from deleteinpartition
+        | where dtm = 20200907""".stripMargin)
+    checkAnswer(
+      sql("""select count(1), dtm from deleteinpartition group by dtm"""),
+      Seq(Row(8, "20200907"), Row(8, "20200908"))
+    )
+
+    // insert overwrite an partition which is not exist.
+    // make sure the delete executed before still works.
+    sql(
+      """insert overwrite table deleteinpartition
+        | partition (dtm=20200909)
+        | select * from deleteinpartition
+        | where dtm = 20200907""".stripMargin)
+    checkAnswer(
+      sql("""select count(1), dtm from deleteinpartition group by dtm"""),
+      Seq(Row(8, "20200907"), Row(8, "20200908"), Row(8, "20200909"))
+    )
+
+    // drop a partition. make sure the delete executed before still works.
+    sql("""alter table deleteinpartition drop partition (dtm=20200908)""")
+    checkAnswer(
+      sql("""select count(1), dtm from deleteinpartition group by dtm"""),
+      Seq(Row(8, "20200907"), Row(8, "20200909"))
+    )
+    sql("""drop table deleteinpartition""")
+  }
+
   test("[CARBONDATA-3491] Return updated/deleted rows count when execute update/delete sql") {
     sql("drop table if exists test_return_row_count")
 
@@ -420,5 +471,7 @@ class DeleteCarbonTableTestCase extends QueryTest with BeforeAndAfterAll {
   override def afterAll {
     sql("use default")
     sql("drop database  if exists iud_db cascade")
+    CarbonProperties.getInstance()
+      .removeProperty(CarbonCommonConstants.CARBON_CLEAN_FILES_FORCE_ALLOWED)
   }
 }

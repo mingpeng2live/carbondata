@@ -24,7 +24,7 @@ import scala.collection.JavaConverters._
 import scala.collection.mutable.ListBuffer
 
 import org.apache.spark.rdd.{CarbonMergeFilesRDD, RDD}
-import org.apache.spark.sql.{functions, CarbonEnv, CarbonUtils, DataFrame, SparkSession, SQLContext}
+import org.apache.spark.sql.{functions, CarbonEnv, CarbonThreadUtil, DataFrame, SparkSession, SQLContext}
 import org.apache.spark.sql.catalyst.analysis.{UnresolvedAlias, UnresolvedFunction}
 import org.apache.spark.sql.catalyst.expressions.Alias
 import org.apache.spark.sql.catalyst.plans.logical.Project
@@ -65,7 +65,9 @@ object SecondaryIndexCreator {
     indexTable: CarbonTable,
     forceAccessSegment: Boolean = false,
     isCompactionCall: Boolean,
-    isLoadToFailedSISegments: Boolean): (CarbonTable, ListBuffer[ICarbonLock], OperationContext) = {
+    isLoadToFailedSISegments: Boolean,
+    isInsertOverwrite: Boolean = false):
+  (CarbonTable, ListBuffer[ICarbonLock], OperationContext) = {
     var indexCarbonTable = indexTable
     val sc = secondaryIndexModel.sqlContext
     // get the thread pool size for secondary index creation
@@ -131,12 +133,16 @@ object SecondaryIndexCreator {
 
       LOGGER.info(s"${indexCarbonTable.getTableUniqueName}: SI loading is started " +
               s"for segments: $validSegmentList")
-
+      var segmentStatus = if (isInsertOverwrite) {
+        SegmentStatus.INSERT_OVERWRITE_IN_PROGRESS
+      } else {
+        SegmentStatus.INSERT_IN_PROGRESS
+      }
       FileInternalUtil
         .updateTableStatus(validSegmentList,
           secondaryIndexModel.carbonLoadModel.getDatabaseName,
           secondaryIndexModel.secondaryIndex.indexName,
-          SegmentStatus.INSERT_IN_PROGRESS,
+          segmentStatus,
           secondaryIndexModel.segmentIdToLoadStartTimeMapping,
           new java.util
           .HashMap[String,
@@ -214,20 +220,6 @@ object SecondaryIndexCreator {
                   } else {
                     null
                   }
-
-                  def findCarbonScanRDD(rdd: RDD[_], currentSegmentFileName: String): Unit = {
-                    rdd match {
-                      case carbonScanRDD: CarbonScanRDD[_] =>
-                        carbonScanRDD.setValidateSegmentToAccess(false)
-                        if (currentSegmentFileName != null) {
-                          carbonScanRDD.setCurrentSegmentFileName(currentSegmentFileName)
-                        }
-                      case others =>
-                        others.dependencies
-                          .foreach { x => findCarbonScanRDD(x.rdd, currentSegmentFileName) }
-                    }
-                  }
-
                   findCarbonScanRDD(dataFrame.rdd, currentSegmentFileName)
                   // accumulator to collect segment metadata
                   val segmentMetaDataAccumulator = sc.sparkSession.sqlContext
@@ -356,7 +348,7 @@ object SecondaryIndexCreator {
           successSISegments,
           secondaryIndexModel.carbonLoadModel.getDatabaseName,
           secondaryIndexModel.secondaryIndex.indexName,
-          SegmentStatus.INSERT_IN_PROGRESS,
+          segmentStatus,
           secondaryIndexModel.segmentIdToLoadStartTimeMapping,
           segmentToLoadStartTimeMap,
           indexCarbonTable,
@@ -398,6 +390,23 @@ object SecondaryIndexCreator {
           secondaryIndexModel.sqlContext.sparkSession,
           carbonLoadModelForMergeDataFiles.getFactTimeStamp,
           rebuiltSegments)
+
+        if (isInsertOverwrite) {
+          val overriddenSegments = SegmentStatusManager
+          .readLoadMetadata(indexCarbonTable.getMetadataPath)
+            .filter(loadMetadata => !successSISegments.contains(loadMetadata.getLoadName))
+            .map(_.getLoadName).toList
+          FileInternalUtil
+            .updateTableStatus(
+              overriddenSegments,
+              secondaryIndexModel.carbonLoadModel.getDatabaseName,
+              secondaryIndexModel.secondaryIndex.indexName,
+              SegmentStatus.MARKED_FOR_DELETE,
+              secondaryIndexModel.segmentIdToLoadStartTimeMapping,
+              segmentToLoadStartTimeMap,
+              indexTable,
+              secondaryIndexModel.sqlContext.sparkSession)
+        }
       }
 
       if (!isCompactionCall) {
@@ -473,17 +482,6 @@ object SecondaryIndexCreator {
           }.${ secondaryIndexModel.secondaryIndex.indexName } SET
              |SERDEPROPERTIES ('isSITableEnabled' = 'false')""".stripMargin).collect()
       }
-      try {
-        if (!isCompactionCall) {
-          SegmentStatusManager
-            .deleteLoadsAndUpdateMetadata(indexCarbonTable, false, null)
-        }
-      } catch {
-        case e: Exception =>
-          LOGGER
-            .error("Problem while cleaning up stale folder for index table " +
-                   secondaryIndexModel.secondaryIndex.indexName, e)
-      }
       // close the executor service
       if (null != executorService) {
         executorService.shutdownNow()
@@ -495,6 +493,19 @@ object SecondaryIndexCreator {
           segmentLock.unlock()
         })
       }
+    }
+  }
+
+  def findCarbonScanRDD(rdd: RDD[_], currentSegmentFileName: String): Unit = {
+    rdd match {
+      case carbonScanRDD: CarbonScanRDD[_] =>
+        carbonScanRDD.setValidateSegmentToAccess(false)
+        if (currentSegmentFileName != null) {
+          carbonScanRDD.setCurrentSegmentFileName(currentSegmentFileName)
+        }
+      case others =>
+        others.dependencies
+          .foreach { x => findCarbonScanRDD(x.rdd, currentSegmentFileName) }
     }
   }
 
@@ -571,7 +582,7 @@ object SecondaryIndexCreator {
       projections: String,
       segments: Array[String]): DataFrame = {
     try {
-      CarbonUtils.threadSet(
+      CarbonThreadUtil.threadSet(
         CarbonCommonConstants.CARBON_INPUT_SEGMENTS + carbonTable.getDatabaseName +
         CarbonCommonConstants.POINT + carbonTable.getTableName, segments.mkString(","))
       val logicalPlan = sparkSession.sql(
@@ -598,7 +609,7 @@ object SecondaryIndexCreator {
       tableProperties.put("isPositionIDRequested", "true")
       SparkSQLUtil.execute(newLogicalPlan, sparkSession)
     } finally {
-      CarbonUtils
+      CarbonThreadUtil
         .threadUnset(CarbonCommonConstants.CARBON_INPUT_SEGMENTS +
                      carbonTable.getDatabaseName + CarbonCommonConstants.POINT +
                      carbonTable.getTableName)

@@ -121,7 +121,7 @@ case class UpdateTableModel(
     updatedTimeStamp: Long,
     var executorErrors: ExecutionErrors,
     deletedSegments: Seq[Segment],
-    loadAsNewSegment: Boolean = false)
+    var insertedSegment: Option[String])
 
 case class CompactionModel(compactionSize: Long,
     compactionType: CompactionType,
@@ -136,7 +136,8 @@ case class CompactionCallableModel(carbonLoadModel: CarbonLoadModel,
     sqlContext: SQLContext,
     compactionType: CompactionType,
     currentPartitions: Option[Seq[PartitionSpec]],
-    compactedSegments: java.util.List[String])
+    compactedSegments: java.util.List[String],
+    var compactedPartitions: Option[Seq[PartitionSpec]] = None)
 
 case class AlterPartitionModel(carbonLoadModel: CarbonLoadModel,
     segmentId: String,

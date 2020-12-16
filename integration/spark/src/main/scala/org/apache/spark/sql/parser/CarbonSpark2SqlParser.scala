@@ -42,8 +42,6 @@ import org.apache.spark.util.CarbonReflectionUtils
 
 import org.apache.carbondata.common.exceptions.sql.MalformedCarbonCommandException
 import org.apache.carbondata.core.constants.CarbonCommonConstants
-import org.apache.carbondata.core.datastore.compression.CompressorFactory
-import org.apache.carbondata.core.exception.InvalidConfigurationException
 import org.apache.carbondata.spark.CarbonOption
 import org.apache.carbondata.spark.util.{CarbonScalaUtil, CommonUtil}
 
@@ -514,11 +512,13 @@ class CarbonSpark2SqlParser extends CarbonDDLSqlParser {
     }
 
   protected lazy val cleanFiles: Parser[LogicalPlan] =
-    CLEAN ~> FILES ~> FOR ~> TABLE ~> (ident <~ ".").? ~ ident <~ opt(";") ^^ {
-      case databaseName ~ tableName =>
+    CLEAN ~> FILES ~> FOR ~> TABLE ~> (ident <~ ".").? ~ ident ~
+      (OPTIONS ~> "(" ~> repsep(options, ",") <~ ")").? <~ opt(";") ^^ {
+      case databaseName ~ tableName ~ optionList =>
         CarbonCleanFilesCommand(
           CarbonParserUtil.convertDbNameToLowerCase(databaseName),
-          Option(tableName.toLowerCase()))
+          tableName.toLowerCase(),
+          optionList.map(_.toMap).getOrElse(Map.empty))
     }
 
   protected lazy val explainPlan: Parser[LogicalPlan] =

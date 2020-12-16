@@ -207,6 +207,9 @@ public final class CarbonProperties {
       case CarbonCommonConstants.CARBON_INDEX_SCHEMA_STORAGE:
         validateDMSchemaStorageProvider();
         break;
+      case CarbonCommonConstants.CARBON_TRASH_RETENTION_DAYS:
+        validateTrashFolderRetentionTime();
+        break;
       // TODO : Validation for carbon.lock.type should be handled for addProperty flow
       default:
         // none
@@ -275,6 +278,7 @@ public final class CarbonProperties {
     validateDetailQueryBatchSize();
     validateIndexServerSerializationThreshold();
     validateAndGetLocalDictionarySizeThresholdInMB();
+    validateTrashFolderRetentionTime();
   }
 
   /**
@@ -999,6 +1003,34 @@ public final class CarbonProperties {
   }
 
   /**
+   * returns minor compaction size value from carbon properties or -1 if it is not valid or
+   * not configured
+   *
+   * @return compactionSize
+   */
+  public long getMinorCompactionSize() {
+    long compactionSize = -1;
+    // if not configured, just use default -1
+    if (null != getProperty(CarbonCommonConstants.CARBON_MINOR_COMPACTION_SIZE)) {
+      try {
+        compactionSize = Long.parseLong(getProperty(
+                CarbonCommonConstants.CARBON_MINOR_COMPACTION_SIZE));
+      } catch (NumberFormatException e) {
+        LOGGER.warn("Invalid value is configured for property "
+                + CarbonCommonConstants.CARBON_MINOR_COMPACTION_SIZE + ", considering the default"
+                + " value -1 and not considering segment Size during minor compaction.");
+      }
+      if (compactionSize <= 0) {
+        LOGGER.warn("Invalid value is configured for property "
+                + CarbonCommonConstants.CARBON_MINOR_COMPACTION_SIZE + ", considering the default"
+                + " value -1 and not considering segment Size during minor compaction.");
+        compactionSize = -1;
+      }
+    }
+    return compactionSize;
+  }
+
+  /**
    * returns the number of loads to be preserved.
    *
    * @return
@@ -1246,36 +1278,6 @@ public final class CarbonProperties {
         CarbonCommonConstants.CARBON_DYNAMIC_ALLOCATION_SCHEDULER_TIMEOUT_DEFAULT,
         CarbonCommonConstants.CARBON_DYNAMIC_ALLOCATION_SCHEDULER_TIMEOUT_MIN,
         CarbonCommonConstants.CARBON_DYNAMIC_ALLOCATION_SCHEDULER_TIMEOUT_MAX);
-  }
-
-  /**
-   * Returns configured update delta files value for IUD compaction
-   *
-   * @return numberOfDeltaFilesThreshold
-   */
-  public int getNoUpdateDeltaFilesThresholdForIUDCompaction() {
-    int numberOfDeltaFilesThreshold;
-    try {
-      numberOfDeltaFilesThreshold = Integer.parseInt(
-          getProperty(CarbonCommonConstants.UPDATE_DELTAFILE_COUNT_THRESHOLD_IUD_COMPACTION,
-              CarbonCommonConstants.DEFAULT_UPDATE_DELTAFILE_COUNT_THRESHOLD_IUD_COMPACTION));
-
-      if (numberOfDeltaFilesThreshold < 0 || numberOfDeltaFilesThreshold > 10000) {
-        LOGGER.warn("The specified value for property "
-            + CarbonCommonConstants.UPDATE_DELTAFILE_COUNT_THRESHOLD_IUD_COMPACTION
-            + "is incorrect."
-            + " Correct value should be in range of 0 -10000. Taking the default value.");
-        numberOfDeltaFilesThreshold = Integer.parseInt(
-            CarbonCommonConstants.DEFAULT_UPDATE_DELTAFILE_COUNT_THRESHOLD_IUD_COMPACTION);
-      }
-    } catch (NumberFormatException e) {
-      LOGGER.warn("The specified value for property "
-          + CarbonCommonConstants.UPDATE_DELTAFILE_COUNT_THRESHOLD_IUD_COMPACTION + "is incorrect."
-          + " Correct value should be in range of 0 -10000. Taking the default value.");
-      numberOfDeltaFilesThreshold = Integer
-          .parseInt(CarbonCommonConstants.DEFAULT_UPDATE_DELTAFILE_COUNT_THRESHOLD_IUD_COMPACTION);
-    }
-    return numberOfDeltaFilesThreshold;
   }
 
   /**
@@ -2114,6 +2116,47 @@ public final class CarbonProperties {
       return Integer.MAX_VALUE;
     }
     return Math.abs(Integer.parseInt(thresholdValue));
+  }
+
+  /**
+   * The below method sets the time(in days) for which timestamp folder retention in trash
+   * folder will take place
+   */
+  private void validateTrashFolderRetentionTime() {
+    try {
+      int configuredValue = getTrashFolderRetentionTime();
+      if (configuredValue < 0 ||
+          configuredValue > CarbonCommonConstants.CARBON_TRASH_RETENTION_DAYS_MAXIMUM) {
+        LOGGER.warn("Value of " + CarbonCommonConstants.CARBON_TRASH_RETENTION_DAYS + " is" +
+            " invalid, taking default value instead");
+        carbonProperties.setProperty(CarbonCommonConstants.CARBON_TRASH_RETENTION_DAYS,
+            CarbonCommonConstants.CARBON_TRASH_RETENTION_DAYS_DEFAULT);
+      } else {
+        carbonProperties.setProperty(CarbonCommonConstants.CARBON_TRASH_RETENTION_DAYS,
+            configuredValue + "");
+      }
+    } catch (NumberFormatException e) {
+      LOGGER.error("Invalid value configured for " + CarbonCommonConstants
+          .CARBON_TRASH_RETENTION_DAYS + ", considering the default value");
+      carbonProperties.setProperty(CarbonCommonConstants.CARBON_TRASH_RETENTION_DAYS,
+          CarbonCommonConstants.CARBON_TRASH_RETENTION_DAYS_DEFAULT);
+    }
+  }
+
+  public int getTrashFolderRetentionTime() {
+    return Integer.parseInt(carbonProperties.getProperty(
+        CarbonCommonConstants.CARBON_TRASH_RETENTION_DAYS,
+        CarbonCommonConstants.CARBON_TRASH_RETENTION_DAYS_DEFAULT));
+  }
+
+  /**
+   * Check if the user has allowed the use of clean files command with force option.
+   */
+  public boolean isCleanFilesForceAllowed() {
+    String configuredValue =
+        getProperty(CarbonCommonConstants.CARBON_CLEAN_FILES_FORCE_ALLOWED,
+        CarbonCommonConstants.CARBON_CLEAN_FILES_FORCE_ALLOWED_DEFAULT);
+    return Boolean.parseBoolean(configuredValue);
   }
 
   public static boolean isFilterReorderingEnabled() {

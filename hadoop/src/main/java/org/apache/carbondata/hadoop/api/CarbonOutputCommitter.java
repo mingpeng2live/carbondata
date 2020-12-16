@@ -161,7 +161,7 @@ public class CarbonOutputCommitter extends FileOutputCommitter {
         carbonTable.getCarbonTableIdentifier().getTableId(),
         new SegmentFileStore(carbonTable.getTablePath(),
             segmentFileName + CarbonTablePath.SEGMENT_EXT));
-
+    newMetaEntry.setSegmentFile(segmentFileName + CarbonTablePath.SEGMENT_EXT);
     CarbonLoaderUtil
         .populateNewLoadMetaEntry(newMetaEntry, SegmentStatus.SUCCESS, loadModel.getFactTimeStamp(),
             true);
@@ -231,9 +231,12 @@ public class CarbonOutputCommitter extends FileOutputCommitter {
     if (!segmentsToBeDeleted.trim().isEmpty()) {
       segmentDeleteList = Segment.toSegmentList(segmentsToBeDeleted.split(","), null);
     }
+    boolean isUpdateStatusFileUpdateRequired =
+        (context.getConfiguration().get(CarbonTableOutputFormat.UPDATE_TIMESTAMP) != null);
     if (updateTime != null) {
       CarbonUpdateUtil.updateTableMetadataStatus(Collections.singleton(loadModel.getSegment()),
-          carbonTable, updateTime, true, segmentDeleteList);
+          carbonTable, updateTime, true,
+          isUpdateStatusFileUpdateRequired, segmentDeleteList);
     }
   }
 

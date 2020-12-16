@@ -257,6 +257,7 @@ object CommonUtil {
    */
   def validateTableLevelCompactionProperties(tableProperties: Map[String, String]): Unit = {
     validateMajorCompactionSize(tableProperties)
+    validateMinorCompactionSize(tableProperties)
     validateAutoLoadMerge(tableProperties)
     validateCompactionLevelThreshold(tableProperties)
     validateCompactionPreserveSegmentsOrAllowedDays(tableProperties,
@@ -289,6 +290,29 @@ object CommonUtil {
           s"$majorCompactionSizeStr, only int value greater than 0 is supported.")
       }
       tableProperties.put(tblPropName, majorCompactionSizeStr)
+    }
+  }
+
+  def validateMinorCompactionSize(tableProperties: Map[String, String]): Unit = {
+    var minorCompactionSize: Integer = 0
+    val minorCompactionSizePropName = CarbonCommonConstants.TABLE_MINOR_COMPACTION_SIZE
+    if (tableProperties.contains(minorCompactionSizePropName)) {
+      val minorCompactionSizeStr: String =
+        parsePropertyValueStringInMB(tableProperties(minorCompactionSizePropName))
+      try {
+        minorCompactionSize = Integer.parseInt(minorCompactionSizeStr)
+      } catch {
+        case e: NumberFormatException =>
+          throw new MalformedCarbonCommandException(s"Invalid value $minorCompactionSizeStr" +
+            s" configured for $minorCompactionSizePropName. Please consider configuring value" +
+            s" greater than 0")
+      }
+      if (minorCompactionSize <= 0) {
+        throw new MalformedCarbonCommandException(s"Invalid value $minorCompactionSizeStr" +
+          s" configured for $minorCompactionSizePropName. Please consider configuring value" +
+          s" greater than 0")
+      }
+      tableProperties.put(minorCompactionSizePropName, minorCompactionSizeStr)
     }
   }
 
@@ -540,53 +564,6 @@ object CommonUtil {
     UnsafeSortMemoryManager.
       INSTANCE.freeMemoryAll(taskId)
     ThreadLocalTaskInfo.clearCarbonTaskInfo()
-  }
-
-  /**
-   * The in-progress segments which are in stale state will be marked as deleted
-   * when driver is initializing.
-   * @param databaseLocation
-   * @param dbName
-   */
-  def cleanInProgressSegments(databaseLocation: String, dbName: String): Unit = {
-    val loaderDriver = CarbonProperties.getInstance().
-      getProperty(CarbonCommonConstants.DATA_MANAGEMENT_DRIVER,
-        CarbonCommonConstants.DATA_MANAGEMENT_DRIVER_DEFAULT).toBoolean
-    if (!loaderDriver) {
-      return
-    }
-    try {
-      if (FileFactory.isFileExist(databaseLocation)) {
-        val file = FileFactory.getCarbonFile(databaseLocation)
-        if (file.isDirectory) {
-          val tableFolders = file.listFiles()
-          tableFolders.foreach { tableFolder =>
-            if (tableFolder.isDirectory) {
-              val tablePath = databaseLocation +
-                              CarbonCommonConstants.FILE_SEPARATOR + tableFolder.getName
-              val tableUniqueName = CarbonTable.buildUniqueName(dbName, tableFolder.getName)
-              val tableStatusFile =
-                CarbonTablePath.getTableStatusFilePath(tablePath)
-              if (FileFactory.isFileExist(tableStatusFile)) {
-                try {
-                  val carbonTable = CarbonMetadata.getInstance
-                    .getCarbonTable(tableUniqueName)
-                  SegmentStatusManager.deleteLoadsAndUpdateMetadata(carbonTable, true, null)
-                } catch {
-                  case _: Exception =>
-                    LOGGER.warn(s"Error while cleaning table " +
-                                s"${ tableUniqueName }")
-                }
-              }
-            }
-          }
-        }
-      }
-    } catch {
-      case s: java.io.FileNotFoundException =>
-        // Create folders and files.
-        LOGGER.error(s)
-    }
   }
 
   def getScaleAndPrecision(dataType: String): (Int, Int) = {

@@ -17,7 +17,6 @@
 
 package org.apache.carbondata.hadoop.api;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -29,7 +28,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.regex.Pattern;
 
 import org.apache.carbondata.common.exceptions.DeprecatedFeatureException;
 import org.apache.carbondata.common.logging.LogServiceFactory;
@@ -76,17 +74,8 @@ import org.apache.log4j.Logger;
 // TODO Move dictionary generator which is coded in spark to MR framework.
 public class CarbonTableOutputFormat extends FileOutputFormat<NullWritable, ObjectArrayWritable> {
 
-  protected static final String LOAD_MODEL = "mapreduce.carbontable.load.model";
-  private static final String DATABASE_NAME = "mapreduce.carbontable.databaseName";
-  private static final String TABLE_NAME = "mapreduce.carbontable.tableName";
-  private static final String TABLE = "mapreduce.carbontable.table";
-  private static final String TABLE_PATH = "mapreduce.carbontable.tablepath";
-  private static final String INPUT_SCHEMA = "mapreduce.carbontable.inputschema";
-  private static final String TEMP_STORE_LOCATIONS = "mapreduce.carbontable.tempstore.locations";
-  private static final String OVERWRITE_SET = "mapreduce.carbontable.set.overwrite";
+  public static final String LOAD_MODEL = "mapreduce.carbontable.load.model";
   public static final String COMPLEX_DELIMITERS = "mapreduce.carbontable.complex_delimiters";
-  private static final String CARBON_TRANSACTIONAL_TABLE =
-      "mapreduce.input.carboninputformat.transactional";
   public static final String SERIALIZATION_NULL_FORMAT =
       "mapreduce.carbontable.serialization.null.format";
   public static final String BAD_RECORDS_LOGGER_ENABLE =
@@ -102,6 +91,17 @@ public class CarbonTableOutputFormat extends FileOutputFormat<NullWritable, Obje
   public static final String BAD_RECORD_PATH = "mapreduce.carbontable.bad.record.path";
   public static final String DATE_FORMAT = "mapreduce.carbontable.date.format";
   public static final String TIMESTAMP_FORMAT = "mapreduce.carbontable.timestamp.format";
+
+  private static final String DATABASE_NAME = "mapreduce.carbontable.databaseName";
+  private static final String TABLE_NAME = "mapreduce.carbontable.tableName";
+  private static final String TABLE = "mapreduce.carbontable.table";
+  private static final String TABLE_PATH = "mapreduce.carbontable.tablepath";
+  private static final String INPUT_SCHEMA = "mapreduce.carbontable.inputschema";
+  private static final String TEMP_STORE_LOCATIONS = "mapreduce.carbontable.tempstore.locations";
+  private static final String OVERWRITE_SET = "mapreduce.carbontable.set.overwrite";
+  private static final String CARBON_TRANSACTIONAL_TABLE =
+      "mapreduce.input.carboninputformat.transactional";
+
   /**
    * Set the update timestamp if user sets in case of update query. It needs to be updated
    * in load status update time
@@ -576,7 +576,8 @@ public class CarbonTableOutputFormat extends FileOutputFormat<NullWritable, Obje
         String blockName;
         for (String tuple : tupleId) {
           blockName = CarbonUpdateUtil.getBlockName(
-              (tuple.split(Pattern.quote(File.separator))[TupleIdEnum.BLOCK_ID.getTupleIdIndex()]));
+              (tuple.split(CarbonCommonConstants.FILE_SEPARATOR)
+                      [TupleIdEnum.BLOCK_ID.getTupleIdIndex()]));
 
           if (!blockToDeleteDeltaBlockMapping.containsKey(blockName)) {
             blockDetails = new DeleteDeltaBlockDetails(blockName);

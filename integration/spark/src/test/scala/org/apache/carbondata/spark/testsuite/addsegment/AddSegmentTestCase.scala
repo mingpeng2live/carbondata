@@ -63,6 +63,7 @@ class AddSegmentTestCase extends QueryTest with BeforeAndAfterAll {
     val table = CarbonEnv.getCarbonTable(None, "addsegment1") (sqlContext.sparkSession)
     val path = CarbonTablePath.getSegmentPath(table.getTablePath, "1")
     val newPath = storeLocation + "/" + "addsegtest"
+    val newPathWithLineSeparator = storeLocation + "/" + "addsegtest/"
     copy(path, newPath)
     sql("delete from table addsegment1 where segment.id in (1)")
     sql("clean files for table addsegment1")
@@ -72,6 +73,11 @@ class AddSegmentTestCase extends QueryTest with BeforeAndAfterAll {
       .collect()
     checkAnswer(sql("select count(*) from addsegment1"), Seq(Row(20)))
     checkAnswer(sql("select count(empname) from addsegment1"), Seq(Row(20)))
+
+    sql(s"alter table addsegment1 add segment options('path'='$newPathWithLineSeparator', " +
+        s"'format'='carbon')")
+      .collect()
+    checkAnswer(sql("select count(*) from addsegment1"), Seq(Row(30)))
     FileFactory.deleteAllFilesOfDir(new File(newPath))
   }
 
@@ -910,6 +916,48 @@ class AddSegmentTestCase extends QueryTest with BeforeAndAfterAll {
     checkAnswer(sql(s"select count(*) from $tableName"), Seq(Row(20)))
     checkAnswer(sql(s"select count(*) from $tableName where empno = 11"), Seq(Row(2)))
     checkAnswer(sql(s"select sum(empno) from $tableName where empname = 'arvind' "), Seq(Row(22)))
+    FileFactory.deleteAllFilesOfDir(new File(externalSegmentPath))
+    sql(s"drop table $tableName")
+  }
+
+  test("Test add segment by sdk written segment having timestamp in nanoseconds") {
+    val tableName = "add_segment_test"
+    sql(s"drop table if exists $tableName")
+    sql(
+      s"""
+         | CREATE TABLE $tableName (empno int, empname string, designation String, doj Timestamp,
+         | workgroupcategory int, workgroupcategoryname String, deptno int, deptname String,
+         | projectcode int, projectjoindate Timestamp, projectenddate Date,attendance int,
+         | utilization int,salary int)
+         | STORED AS carbondata
+         |""".stripMargin)
+
+    val externalSegmentPath = storeLocation + "/" + "external_segment"
+    FileFactory.deleteAllFilesOfDir(new File(externalSegmentPath))
+
+    // write into external segment folder
+    val schemaFilePath = s"$storeLocation/$tableName/Metadata/schema"
+    val writer = CarbonWriter.builder
+      .outputPath(externalSegmentPath)
+      .withSchemaFile(schemaFilePath)
+      .uniqueIdentifier(System.nanoTime())
+      .writtenBy("AddSegmentTestCase")
+      .withCsvInput()
+      .build()
+    val source = Source.fromFile(s"$resourcesPath/data.csv")
+    var count = 0
+    for (line <- source.getLines()) {
+      if (count != 0) {
+        writer.write(line.split(","))
+      }
+      count = count + 1
+    }
+    writer.close()
+
+    sql(s"alter table $tableName add segment " +
+      s"options('path'='$externalSegmentPath', 'format'='carbon')").collect()
+    sql(s"delete from $tableName where empno = 12").collect()
+    checkAnswer(sql(s"select count(*) from $tableName"), Seq(Row(9)))
     FileFactory.deleteAllFilesOfDir(new File(externalSegmentPath))
     sql(s"drop table $tableName")
   }

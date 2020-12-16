@@ -58,6 +58,8 @@ private[sql] case class DropIndexCommand(
     if (!parentTable.getIndexTableNames().contains(indexName)) {
       if (!ifExistsSet) {
         throw new MalformedIndexCommandException("Index with name " + indexName + " does not exist")
+      } else {
+      return Seq.empty
       }
     }
     if (parentTable.getIndexTableNames(IndexType.SI.getIndexProviderName)
@@ -183,17 +185,20 @@ private[sql] case class DropIndexCommand(
           parentCarbonTable)
         parentCarbonTable = getRefreshedParentTable(sparkSession, dbName)
         val indexMetadata = parentCarbonTable.getIndexMetadata
+        var hasCgFgIndexes = false
         if (null != indexMetadata && null != indexMetadata.getIndexesMap) {
-          val hasCgFgIndexes =
-            !(indexMetadata.getIndexesMap.size() == 1 &&
-              indexMetadata.getIndexesMap.containsKey(IndexType.SI.getIndexProviderName))
-          if (hasCgFgIndexes) {
-            CarbonIndexUtil
-              .addOrModifyTableProperty(parentCarbonTable,
-                Map("indexExists" -> "false"), needLock = false)(sparkSession)
+          // check if any CG or FG index exists. If not exists,
+          // then set indexExists as false to return empty index list for next query.
+          hasCgFgIndexes =
+            indexMetadata.getIndexesMap.containsKey(IndexType.BLOOMFILTER.getIndexProviderName) ||
+              indexMetadata.getIndexesMap.containsKey(IndexType.LUCENE.getIndexProviderName)
+        }
+        if (!hasCgFgIndexes) {
+          CarbonIndexUtil
+            .addOrModifyTableProperty(parentCarbonTable,
+              Map("indexExists" -> "false"), needLock = false)(sparkSession)
 
-            CarbonHiveIndexMetadataUtil.refreshTable(dbName, parentTableName, sparkSession)
-          }
+          CarbonHiveIndexMetadataUtil.refreshTable(dbName, parentTableName, sparkSession)
         }
       }
     } finally {
@@ -203,18 +208,12 @@ private[sql] case class DropIndexCommand(
           logInfo("Table MetaData Unlocked Successfully")
           if (isValidDeletion) {
             if (carbonTable != null && carbonTable.isDefined) {
-              CarbonInternalMetastore.deleteTableDirectory(dbName, indexName, sparkSession)
+              CarbonInternalMetastore.deleteTableDirectory(carbonTable.get)
             }
           }
         } else {
           logError("Table metadata unlocking is unsuccessful, index table may be in stale state")
         }
-      }
-      // in case if the the physical folders still exists for the index table
-      // but the carbon and hive info for the index table is removed,
-      // DROP INDEX IF EXISTS should clean up those physical directories
-      if (ifExistsSet && carbonTable.isEmpty) {
-        CarbonInternalMetastore.deleteTableDirectory(dbName, indexName, sparkSession)
       }
     }
     Seq.empty

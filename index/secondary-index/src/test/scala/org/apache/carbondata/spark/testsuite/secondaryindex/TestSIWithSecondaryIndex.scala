@@ -89,7 +89,7 @@ class TestSIWithSecondaryIndex extends QueryTest with BeforeAndAfterAll {
     sql("insert into table1 select 'xx', '2', 'china' union all select 'xx', '1', 'india'")
     sql("create index table1_index on table table1(id, country) as 'carbondata' properties" +
         "('sort_scope'='global_sort', 'Global_sort_partitions'='3')")
-    checkAnswerWithoutSort(sql("select id, country from table1_index"),
+    checkAnswer(sql("select id, country from table1_index"),
       Seq(Row("1", "india"), Row("2", "china")))
     // check for valid sort_scope
     checkExistence(sql("describe formatted table1_index"), true, "Sort Scope global_sort")
@@ -112,7 +112,7 @@ class TestSIWithSecondaryIndex extends QueryTest with BeforeAndAfterAll {
     sql("create index table11_index on table table11(id, country) as 'carbondata' properties" +
         "('sort_scope'='global_sort', 'Global_sort_partitions'='3')")
     sql("insert into table11 select 'xx', '2', 'china' union all select 'xx', '1', 'india'")
-    checkAnswerWithoutSort(sql("select id, country from table11_index"),
+    checkAnswer(sql("select id, country from table11_index"),
       Seq(Row("1", "india"), Row("2", "china")))
     // check for valid sort_scope
     checkExistence(sql("describe formatted table11_index"), true, "Sort Scope global_sort")
@@ -128,7 +128,7 @@ class TestSIWithSecondaryIndex extends QueryTest with BeforeAndAfterAll {
         "('sort_scope'='global_sort', 'Global_sort_partitions'='3')")
     sql("insert into partition_carbon_table select 'xx', '2', 'china', '2020' " +
         "union all select 'xx', '1', 'india', '2021'")
-    checkAnswerWithoutSort(sql("select id, country from partition_carbon_table_index"),
+    checkAnswer(sql("select id, country from partition_carbon_table_index"),
       Seq(Row("1", "india"), Row("2", "china")))
     // check for valid sort_scope
     checkExistence(sql("describe formatted partition_carbon_table_index"),
@@ -138,7 +138,7 @@ class TestSIWithSecondaryIndex extends QueryTest with BeforeAndAfterAll {
     sql("create index partition_carbon_table_index on table partition_carbon_table(" +
         "id, country) as 'carbondata' properties" +
         "('sort_scope'='global_sort', 'Global_sort_partitions'='3')")
-    checkAnswerWithoutSort(sql("select id, country from partition_carbon_table_index"),
+    checkAnswer(sql("select id, country from partition_carbon_table_index"),
       Seq(Row("1", "india"), Row("2", "china")))
     // check for valid sort_scope
     checkExistence(sql("describe formatted partition_carbon_table_index"),
@@ -155,7 +155,7 @@ class TestSIWithSecondaryIndex extends QueryTest with BeforeAndAfterAll {
     sql("drop index if exists complextable_index_1 on complextable")
     sql("create index complextable_index_1 on table complextable(country, name) " +
         "as 'carbondata' properties('sort_scope'='global_sort', 'Global_sort_partitions'='3')")
-    checkAnswerWithoutSort(sql("select country,name from complextable_index_1"),
+    checkAnswer(sql("select country,name from complextable_index_1"),
       Seq(Row("china", "b"), Row("china", "v"), Row("india", "v"), Row("pak", "v"), Row("us", "b")))
     // check for valid sort_scope
     checkExistence(sql("describe formatted complextable_index_1"), true, "Sort Scope global_sort")
@@ -283,6 +283,12 @@ class TestSIWithSecondaryIndex extends QueryTest with BeforeAndAfterAll {
       indexTable.getMetadataPath + CarbonCommonConstants.FILE_SEPARATOR +
       CarbonTablePath.TABLE_STATUS_FILE,
       loadMetadataDetailsList)
+    CarbonProperties.getInstance()
+      .addProperty(CarbonCommonConstants.CARBON_CLEAN_FILES_FORCE_ALLOWED, "true")
+    sql(s"CLEAN FILES FOR TABLE ud_index1  OPTIONS('stale_inprogress'='true','force'='true')")
+        .show()
+    CarbonProperties.getInstance()
+      .removeProperty(CarbonCommonConstants.CARBON_CLEAN_FILES_FORCE_ALLOWED)
 
     sql(s"""ALTER TABLE default.ud_index1 SET
            |SERDEPROPERTIES ('isSITableEnabled' = 'false')""".stripMargin)
@@ -426,6 +432,38 @@ class TestSIWithSecondaryIndex extends QueryTest with BeforeAndAfterAll {
     assert(plan.contains("special_char_index"))
     val df = sql("describe formatted special_char_index").collect()
     assert(df.exists(_.get(0).toString.contains("nam(e")))
+  }
+
+  test("test alter table set streaming for table having SI") {
+    sql("drop table if exists maintable2")
+    sql("create table maintable2 (a string,b string,c int) STORED AS carbondata ")
+    sql("insert into maintable2 values('k','x',2)")
+    sql("create index m_indextable on table maintable2(b) AS 'carbondata'")
+    var exeption = intercept[RuntimeException] {
+      sql("ALTER TABLE maintable2 SET TBLPROPERTIES('streaming'='true')")
+    }
+    assert(exeption.getMessage.contains("Set streaming table is " +
+      "not allowed for tables which are having index(s)."))
+
+    exeption = intercept[RuntimeException] {
+      sql("ALTER TABLE m_indextable SET TBLPROPERTIES('streaming'='true')")
+    }
+    assert(exeption.getMessage.contains("Set streaming table is not allowed on the index table."))
+    sql("drop table if exists maintable2")
+  }
+
+  test("test change data type from string to long string of SI column") {
+    sql("drop table if exists maintable")
+    sql("create table maintable (a string,b string,c int) STORED AS carbondata ")
+    sql("create index indextable on table maintable(b) AS 'carbondata'")
+    sql("insert into maintable values('k','x',2)")
+    val exception = intercept[RuntimeException] {
+      sql("ALTER TABLE maintable SET TBLPROPERTIES('long_String_columns'='b')")
+    }
+    assert(exception.getMessage.contains("Cannot Alter column b to " +
+      "Long_string_column, as the column exists in a secondary index with name " +
+      "indextable. LONG_STRING_COLUMNS is not allowed on secondary index."))
+    sql("drop table if exists maintable")
   }
 
   override def afterAll {

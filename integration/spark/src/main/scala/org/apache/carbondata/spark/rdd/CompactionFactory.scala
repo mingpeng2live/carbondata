@@ -32,17 +32,13 @@ object CompactionFactory {
    */
   def getCompactor(carbonLoadModel: CarbonLoadModel,
       compactionModel: CompactionModel,
-      executor: ExecutorService,
       sqlContext: SQLContext,
-      storeLocation: String,
       mergedLoads: java.util.List[String],
       operationContext: OperationContext): Compactor = {
     new CarbonTableCompactor(
       carbonLoadModel,
       compactionModel,
-      executor,
       sqlContext,
-      storeLocation,
       mergedLoads,
       operationContext)
   }
