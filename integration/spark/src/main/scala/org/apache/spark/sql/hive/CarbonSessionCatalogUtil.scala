@@ -23,7 +23,6 @@ import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.catalog._
 import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.parser.CarbonSparkSqlParserUtil
-
 import org.apache.carbondata.core.metadata.schema.table.CarbonTable
 import org.apache.carbondata.core.metadata.schema.table.column.ColumnSchema
 
@@ -60,6 +59,19 @@ object CarbonSessionCatalogUtil {
       s"SET SERDEPROPERTIES" +
       s"('tableName'='${ newTableIdentifier.table }', " +
       s"'dbName'='${ newTableIdentifier.database.get }', 'tablePath'='${ newTablePath }')")
+  }
+
+  def alterTablePath(
+    newTableIdentifier: TableIdentifier,
+    newTablePath: String,
+    sparkSession: SparkSession
+  ): Unit = {
+    getClient(sparkSession).runSqlHive(
+      s"ALTER TABLE ${ newTableIdentifier.database.get }.${ newTableIdentifier.table } " +
+        s"SET SERDEPROPERTIES" +
+        s"('tableName'='${ newTableIdentifier.table }', " +
+        s"'dbName'='${ newTableIdentifier.database.get }', 'tablePath'='${ newTablePath }', " +
+        s"'dbname'='${ newTableIdentifier.database.get }', 'tablepath'='${ newTablePath }')")
   }
 
   def alterTableProperties(
