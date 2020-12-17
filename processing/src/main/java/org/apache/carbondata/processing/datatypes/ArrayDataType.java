@@ -174,8 +174,9 @@ public class ArrayDataType implements GenericDataType<ArrayObject> {
   public void writeByteArray(ArrayObject input, DataOutputStream dataOutputStream,
       BadRecordLogHolder logHolder, Boolean isWithoutConverter) throws IOException {
     if (input == null) {
-      dataOutputStream.writeInt(1);
-      children.writeByteArray(null, dataOutputStream, logHolder, isWithoutConverter);
+      dataOutputStream.writeInt(-1);
+//      dataOutputStream.writeInt(1);
+//      children.writeByteArray(null, dataOutputStream, logHolder, isWithoutConverter);
     } else {
       Object[] data = input.getData();
       dataOutputStream.writeInt(data.length);
@@ -189,15 +190,16 @@ public class ArrayDataType implements GenericDataType<ArrayObject> {
   public void parseComplexValue(ByteBuffer byteArrayInput, DataOutputStream dataOutputStream)
       throws IOException, KeyGenException {
     int dataLength = byteArrayInput.getInt();
-
     dataOutputStream.writeInt(dataLength);
-    if (children instanceof PrimitiveDataType) {
-      if (children.getIsColumnDictionary()) {
-        dataOutputStream.writeInt(ByteUtil.dateBytesSize());
+    if (dataLength != -1) {
+      if (children instanceof PrimitiveDataType) {
+        if (children.getIsColumnDictionary()) {
+          dataOutputStream.writeInt(ByteUtil.dateBytesSize());
+        }
       }
-    }
-    for (int i = 0; i < dataLength; i++) {
-      children.parseComplexValue(byteArrayInput, dataOutputStream);
+      for (int i = 0; i < dataLength; i++) {
+        children.parseComplexValue(byteArrayInput, dataOutputStream);
+      }
     }
   }
 

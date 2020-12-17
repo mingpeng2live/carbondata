@@ -131,9 +131,9 @@ public class ArrayQueryType extends ComplexQueryType implements GenericQueryType
         data[i] = children.getDataBasedOnDataType(dataBuffer);
       }
     }
-    if (dataLength == 1 && data[0] == null) {
-      return null;
-    }
+//    if (dataLength == 1 && data[0] == null) {
+//      return null;
+//    }
     return data;
   }
 

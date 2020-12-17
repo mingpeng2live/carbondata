@@ -175,12 +175,13 @@ public class StructDataType implements GenericDataType<StructObject> {
   @Override
   public void writeByteArray(StructObject input, DataOutputStream dataOutputStream,
       BadRecordLogHolder logHolder, Boolean isWithoutConverter) throws IOException {
-    dataOutputStream.writeShort(children.size());
     if (input == null) {
-      for (int i = 0; i < children.size(); i++) {
-        children.get(i).writeByteArray(null, dataOutputStream, logHolder, isWithoutConverter);
-      }
+      dataOutputStream.writeShort(-1);
+//      for (int i = 0; i < children.size(); i++) {
+//        children.get(i).writeByteArray(null, dataOutputStream, logHolder, isWithoutConverter);
+//      }
     } else {
+      dataOutputStream.writeShort(children.size());
       Object[] data = input.getData();
       for (int i = 0; i < data.length && i < children.size(); i++) {
         children.get(i).writeByteArray(data[i], dataOutputStream, logHolder, isWithoutConverter);
@@ -206,13 +207,15 @@ public class StructDataType implements GenericDataType<StructObject> {
       throws IOException, KeyGenException {
     short childElement = byteArrayInput.getShort();
     dataOutputStream.writeShort(childElement);
-    for (int i = 0; i < childElement; i++) {
-      if (children.get(i) instanceof PrimitiveDataType) {
-        if (children.get(i).getIsColumnDictionary()) {
-          dataOutputStream.writeInt(ByteUtil.dateBytesSize());
+    if (childElement != -1) {
+      for (int i = 0; i < childElement; i++) {
+        if (children.get(i) instanceof PrimitiveDataType) {
+          if (children.get(i).getIsColumnDictionary()) {
+            dataOutputStream.writeInt(ByteUtil.dateBytesSize());
+          }
         }
+        children.get(i).parseComplexValue(byteArrayInput, dataOutputStream);
       }
-      children.get(i).parseComplexValue(byteArrayInput, dataOutputStream);
     }
   }
 

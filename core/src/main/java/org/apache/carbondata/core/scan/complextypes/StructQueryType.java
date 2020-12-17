@@ -116,26 +116,32 @@ public class StructQueryType extends ComplexQueryType implements GenericQueryTyp
   @Override
   public Object getDataBasedOnDataType(ByteBuffer dataBuffer) {
     int childLength = dataBuffer.getShort();
+    if (childLength == -1) {
+      return null;
+    }
     Object[] fields = new Object[childLength];
     for (int i = 0; i < childLength; i++) {
       fields[i] =  children.get(i).getDataBasedOnDataType(dataBuffer);
     }
-    boolean isAllNull = true;
-    for (Object field : fields) {
-      if (field != null) {
-        isAllNull = false;
-        break;
-      }
-    }
-    if (isAllNull) {
-      return null;
-    }
+//    boolean isAllNull = true;
+//    for (Object field : fields) {
+//      if (field != null) {
+//        isAllNull = false;
+//        break;
+//      }
+//    }
+//    if (isAllNull) {
+//      return null;
+//    }
     return DataTypeUtil.getDataTypeConverter().wrapWithGenericRow(fields);
   }
 
   @Override
   public Object[] getObjectArrayDataBasedOnDataType(ByteBuffer dataBuffer) {
     int childLength = dataBuffer.getShort();
+    if (childLength == -1) {
+      return null;
+    }
     Object[] fields = new Object[childLength];
     for (int i = 0; i < childLength; i++) {
       fields[i] =  children.get(i).getObjectDataBasedOnDataType(dataBuffer);

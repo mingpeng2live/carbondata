@@ -457,6 +457,9 @@ public abstract class VarLengthColumnPageBase extends ColumnPage {
       outputLength = totalLength + ((rowOffset.getActualRowCount() - 1)
           * CarbonCommonConstants.SHORT_SIZE_IN_BYTE);
     }
+    if(outputLength < 0) {
+      outputLength = 0;
+    }
     byte[] data = new byte[outputLength];
     for (int rowId = 0; rowId < rowOffset.getActualRowCount() - 1; rowId++) {
       if (dataType == DataTypes.BYTE_ARRAY) {
