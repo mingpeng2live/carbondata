@@ -254,28 +254,36 @@ class AlterTableColumnSchemaGenerator(
       .getOrElse(Array.empty[String])
 
     // add new dimension columns
-    alterTableModel.dimCols.foreach(field => {
-      val encoders = new java.util.ArrayList[Encoding]()
-      val columnSchema: ColumnSchema = TableNewProcessor.createColumnSchema(
-        field,
-        encoders,
-        isDimensionCol = true,
-        field.precision,
-        field.scale,
-        field.schemaOrdinal + currentSchemaOrdinal,
-        alterTableModel.highCardinalityDims,
-        alterTableModel.databaseName.getOrElse(dbName),
-        isSortColumn(field.name.getOrElse(field.column)),
-        isVarcharColumn(field.name.getOrElse(field.column)))
-      if (columnSchema.getDataType == DataTypes.VARCHAR) {
-        // put the new long string columns in 'longStringCols'
-        // and add them after old long string columns
-        longStringCols ++= Seq(columnSchema)
-      } else {
-        allColumns ++= Seq(columnSchema)
-      }
-      newCols ++= Seq(columnSchema)
-    })
+    def newCloss(cols: Seq[Field], nc: Int = 0): Unit = {
+      cols.foreach(field => {
+        val encoders = new java.util.ArrayList[Encoding]()
+        val columnSchema: ColumnSchema = TableNewProcessor.createColumnSchema(
+          field,
+          encoders,
+          isDimensionCol = true,
+          field.precision,
+          field.scale,
+          if (nc == 0) field.schemaOrdinal + currentSchemaOrdinal else field.schemaOrdinal,
+          alterTableModel.highCardinalityDims,
+          alterTableModel.databaseName.getOrElse(dbName),
+          isSortColumn(field.name.getOrElse(field.column)),
+          isVarcharColumn(field.name.getOrElse(field.column)))
+        if (columnSchema.getDataType == DataTypes.VARCHAR) {
+          // put the new long string columns in 'longStringCols'
+          // and add them after old long string columns
+          longStringCols ++= Seq(columnSchema)
+        } else {
+          allColumns ++= Seq(columnSchema)
+        }
+        newCols ++= Seq(columnSchema)
+        if (field.children.get != null && field.children.get.nonEmpty) {
+          val ch = field.children.get.toSeq
+          newCloss(ch, 1)
+        }
+      })
+    }
+    newCloss(alterTableModel.dimCols)
+
     // put the old long string columns
     allColumns ++= tableCols.filter(x =>
       (x.isDimensionColumn && (x.getDataType == DataTypes.VARCHAR)))
@@ -319,9 +327,9 @@ class AlterTableColumnSchemaGenerator(
         sys.error(s"Duplicate column found with name: $name")
       })
 
-    if (newCols.exists(_.getDataType.isComplexType)) {
-      sys.error(s"Complex column cannot be added")
-    }
+//    if (newCols.exists(_.getDataType.isComplexType)) {
+//      sys.error(s"Complex column cannot be added")
+//    }
 
     val columnValidator = CarbonSparkFactory.getCarbonColumnValidator
     columnValidator.validateColumns(allColumns)
@@ -518,7 +526,7 @@ object TableNewProcessor {
       databaseName: String,
       isSortColumn: Boolean = false,
       isVarcharColumn: Boolean = false): ColumnSchema = {
-    val dataType = DataTypeConverterUtil.convertToCarbonType(field.dataType.getOrElse(""))
+    val dataType = DataTypeConverterUtil.convertToCarbonType(field)
     if (DataTypes.isDecimal(dataType)) {
       dataType.asInstanceOf[DecimalType].setPrecision(field.precision)
       dataType.asInstanceOf[DecimalType].setScale(field.scale)
@@ -529,6 +537,12 @@ object TableNewProcessor {
     } else {
       columnSchema.setDataType(dataType)
     }
+
+    if (field.children.get != null && field.children.get.nonEmpty) {
+      val num = field.children.get.size
+      columnSchema.setNumberOfChild(num)
+    }
+
     val colName = field.name.getOrElse(field.column)
     columnSchema.setColumnName(colName)
     if (highCardinalityDims.contains(colName)) {

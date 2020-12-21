@@ -41,12 +41,12 @@ class AddColumnTestCases extends QueryTest with BeforeAndAfterAll {
       "decimalField DECIMAL(6,2)) STORED AS carbondata")
     sql(s"LOAD DATA LOCAL INPATH '$resourcesPath/restructure/data4.csv' INTO TABLE addcolumntest " +
         s"OPTIONS('FILEHEADER'='intField,stringField,timestampField,decimalField')")
-    sql(
-      "ALTER TABLE addcolumntest ADD COLUMNS(charField STRING) TBLPROPERTIES" +
-      "('DEFAULT.VALUE.charfield'='def')")
-    sql(s"LOAD DATA LOCAL INPATH '$resourcesPath/restructure/data1.csv' INTO TABLE addcolumntest " +
-        s"OPTIONS('FILEHEADER'='intField,stringField,charField,timestampField,decimalField')")
-    sql("CREATE TABLE hivetable STORED AS PARQUET SELECT * FROM addcolumntest")
+//    sql(
+//      "ALTER TABLE addcolumntest ADD COLUMNS(charField STRING) TBLPROPERTIES" +
+//      "('DEFAULT.VALUE.charfield'='def')")
+//    sql(s"LOAD DATA LOCAL INPATH '$resourcesPath/restructure/data1.csv' INTO TABLE addcolumntest " +
+//        s"OPTIONS('FILEHEADER'='intField,stringField,charField,timestampField,decimalField')")
+//    sql("CREATE TABLE hivetable STORED AS PARQUET SELECT * FROM addcolumntest")
     CarbonProperties.getInstance()
       .addProperty(CarbonCommonConstants.CARBON_TIMESTAMP_FORMAT, "dd-MM-yyy")
   }
@@ -57,6 +57,46 @@ class AddColumnTestCases extends QueryTest with BeforeAndAfterAll {
 
     sqlContext.setConf("carbon.enable.vector.reader", "false")
     checkAnswer(sql("SELECT charField FROM addcolumntest WHERE charField LIKE 'd%'"), Row("def"))
+  }
+
+  test("test add complex type on new column") {
+//    sql("CREATE TABLE addcolumntest(intField INT,timestampField TIMESTAMP, colArray array<STRING>, colMap map<STRING, STRING>) STORED AS carbondata")
+    sql("select * from addcolumntest")
+    sql("ALTER TABLE addcolumntest ADD COLUMNS(makets array<INT>)")
+    val re = sql("select * from addcolumntest")
+    re.show()
+    sql("insert into addcolumntest values(105, 'spark5', '2018-04-26 12:01:01', 466.22, array(12))")
+    val rei = sql("select * from addcolumntest")
+    rei.show()
+
+    sql("alter table addcolumntest change makets maketings array<INT>")
+    val rec = sql("select maketings from addcolumntest")
+    rec.show()
+    sql("insert into addcolumntest values(106, 'spark5', '2018-04-27 12:01:01', 466.22, array(18))")
+    val reci = sql("select * from addcolumntest")
+    reci.show()
+
+    sql("ALTER TABLE addcolumntest DROP COLUMNS(maketings)")
+    val res = sql("select * from addcolumntest")
+    res.show()
+  }
+
+  test("test rename table name") {
+    sql("DROP TABLE IF EXISTS columnt")
+    sql("DROP TABLE IF EXISTS columntest")
+    sql("CREATE TABLE columntest(intField INT,timestampField TIMESTAMP, colArray array<STRING>) STORED AS carbondata")
+    sql("ALTER TABLE columntest rename to columnt")
+//    sql("CREATE TABLE columntest(intField INT,timestampField TIMESTAMP, colArray array<STRING>) STORED AS carbondata")
+//    sql("drop TABLE columnt")
+//    sql("select * from columntest")
+    sql("select * from columnt")
+  }
+
+  test("test insert into fixed field column") {
+    sql("insert into addcolumntest values(104, 'spark5', '2018-04-26 12:01:01', 466.22)")
+    sql("insert into addcolumntest (intField,stringField,timestampField) values(105, 'spark5', '2018-04-26 12:01:01')")
+    val frame = sql("select * from addcolumntest")
+    frame.show()
   }
 
   test("test is not null filter on new column") {

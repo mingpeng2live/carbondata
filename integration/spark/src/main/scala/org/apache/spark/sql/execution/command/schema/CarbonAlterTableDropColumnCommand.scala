@@ -117,10 +117,10 @@ private[sql] case class CarbonAlterTableDropColumnCommand(
               }
             }
             // Check if column to be dropped is of complex dataType
-            if (tableColumn.getDataType.isComplexType) {
-              val errMsg = "Complex column cannot be dropped"
-              throw new MalformedCarbonCommandException(errMsg)
-            }
+//            if (tableColumn.getDataType.isComplexType) {
+//              val errMsg = "Complex column cannot be dropped"
+//              throw new MalformedCarbonCommandException(errMsg)
+//            }
             columnExist = true
           }
         }

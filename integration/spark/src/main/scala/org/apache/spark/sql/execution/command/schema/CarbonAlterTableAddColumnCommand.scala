@@ -17,13 +17,6 @@
 
 package org.apache.spark.sql.execution.command.schema
 
-import scala.collection.JavaConverters._
-
-import org.apache.spark.sql.{CarbonEnv, Row, SparkSession}
-import org.apache.spark.sql.execution.command.{AlterTableAddColumnsModel, AlterTableColumnSchemaGenerator, MetadataCommand}
-import org.apache.spark.sql.hive.CarbonSessionCatalogUtil
-import org.apache.spark.util.{AlterTableUtil, SparkUtil}
-
 import org.apache.carbondata.common.exceptions.sql.MalformedCarbonCommandException
 import org.apache.carbondata.common.logging.LogServiceFactory
 import org.apache.carbondata.core.features.TableOperation
@@ -32,13 +25,19 @@ import org.apache.carbondata.core.metadata.converter.ThriftWrapperSchemaConverte
 import org.apache.carbondata.core.metadata.schema.table.CarbonTable
 import org.apache.carbondata.events.{AlterTableAddColumnPostEvent, AlterTableAddColumnPreEvent, OperationContext, OperationListenerBus}
 import org.apache.carbondata.format.TableInfo
+import org.apache.spark.sql.execution.command.{AlterTableAddColumnsModel, AlterTableColumnSchemaGenerator, MetadataCommand}
+import org.apache.spark.sql.hive.CarbonSessionCatalogUtil
+import org.apache.spark.sql.{CarbonEnv, Row, SparkSession}
+import org.apache.spark.util.AlterTableUtil
+
+import scala.collection.JavaConverters._
 
 private[sql] case class CarbonAlterTableAddColumnCommand(
     alterTableAddColumnsModel: AlterTableAddColumnsModel)
   extends MetadataCommand {
+  val LOGGER = LogServiceFactory.getLogService(this.getClass.getCanonicalName)
 
   override def processMetadata(sparkSession: SparkSession): Seq[Row] = {
-    val LOGGER = LogServiceFactory.getLogService(this.getClass.getCanonicalName)
     val tableName = alterTableAddColumnsModel.tableName
     val dbName = alterTableAddColumnsModel.databaseName
       .getOrElse(sparkSession.catalog.currentDatabase)
@@ -75,6 +74,10 @@ private[sql] case class CarbonAlterTableAddColumnCommand(
           dbName,
           tableName,
           carbonTable.getTablePath)
+//      val identifier = new TableIdentifier(tableName, Some(dbName))
+//      val catalogTable = sparkSession.sessionState.catalog.getTableMetadata(identifier)
+//      alterTableAddColumnsModel.dimCols
+//      AlterTableAddColumnsCommand(identifier, ).run(sparkSession)
       newCols = new AlterTableColumnSchemaGenerator(alterTableAddColumnsModel,
         dbName,
         wrapperTableInfo,
@@ -92,7 +95,7 @@ private[sql] case class CarbonAlterTableAddColumnCommand(
       val carbonColumns = carbonTable.getCreateOrderColumn().asScala
         .collect { case carbonColumn if !carbonColumn.isInvisible => carbonColumn.getColumnSchema }
       // sort the new columns based on schema order
-      val sortedColsBasedActualSchemaOrder = newCols.sortBy(a => a.getSchemaOrdinal)
+      val sortedColsBasedActualSchemaOrder = newCols.filter(a => !a.isComplexColumn).sortBy(a => a.getSchemaOrdinal)
       val tableIdentifier = AlterTableUtil.updateSchemaInfo(
           carbonTable,
           schemaConverter.fromWrapperToExternalSchemaEvolutionEntry(schemaEvolutionEntry),
@@ -118,6 +121,7 @@ private[sql] case class CarbonAlterTableAddColumnCommand(
       LOGGER.info(s"Alter table for add columns is successful for table $dbName.$tableName")
     } catch {
       case e: Exception =>
+        LOGGER.error("Alter table add operation failed", e) //
         if (newCols.nonEmpty) {
           LOGGER.info("Cleaning up the dictionary files as alter table add operation failed")
           AlterTableUtil.revertAddColumnChanges(dbName, tableName, timeStamp)(sparkSession)

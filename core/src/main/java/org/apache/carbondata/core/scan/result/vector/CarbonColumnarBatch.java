@@ -82,7 +82,7 @@ public class CarbonColumnarBatch {
    * @param rowId
    */
   public void markFiltered(int rowId) {
-    if (!filteredRows[rowId]) {
+    if (filteredRows != null && !filteredRows[rowId]) {
       filteredRows[rowId] = true;
       rowsFiltered++;
     }

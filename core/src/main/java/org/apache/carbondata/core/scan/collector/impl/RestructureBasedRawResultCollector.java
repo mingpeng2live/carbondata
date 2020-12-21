@@ -125,13 +125,13 @@ public class RestructureBasedRawResultCollector extends RawBasedResultCollector 
           new byte[noDictKeyArray.length + dimensionInfo.getNewNoDictionaryColumnCount()][];
       int existingColumnValueIndex = 0;
       int newKeyArrayIndex = 0;
-      for (int i = 0; i < dimensionInfo.getDimensionExists().length; i++) {
+      for (int i = 0; i < dimensionInfo.getDimensionExists().length; i++, newKeyArrayIndex++, existingColumnValueIndex++) {
         if (actualQueryDimensions[i].getDimension().getDataType() != DataTypes.DATE
             && !actualQueryDimensions[i].getDimension().hasEncoding(Encoding.IMPLICIT)) {
           // if dimension exists then add the byte array value else add the default value
           if (dimensionInfo.getDimensionExists()[i]) {
-            noDictionaryKeyArrayWithNewlyAddedColumns[newKeyArrayIndex++] =
-                noDictKeyArray[existingColumnValueIndex++];
+            noDictionaryKeyArrayWithNewlyAddedColumns[newKeyArrayIndex] =
+                noDictKeyArray[existingColumnValueIndex];
           } else {
             byte[] newColumnDefaultValue = null;
             Object defaultValue = dimensionInfo.getDefaultValues()[i];
@@ -144,7 +144,7 @@ public class RestructureBasedRawResultCollector extends RawBasedResultCollector 
             } else {
               newColumnDefaultValue = CarbonCommonConstants.EMPTY_BYTE_ARRAY;
             }
-            noDictionaryKeyArrayWithNewlyAddedColumns[newKeyArrayIndex++] = newColumnDefaultValue;
+            noDictionaryKeyArrayWithNewlyAddedColumns[newKeyArrayIndex] = newColumnDefaultValue;
           }
         }
       }

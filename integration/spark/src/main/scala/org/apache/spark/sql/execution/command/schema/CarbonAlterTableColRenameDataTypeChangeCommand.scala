@@ -55,11 +55,11 @@ abstract class CarbonAlterTableColumnRenameCommand(oldColumnName: String, newCol
     }
 
     // if the column rename is for complex column, block the operation
-    if (oldCarbonColumn.isComplex) {
-      throw new MalformedCarbonCommandException(s"Column Rename Operation failed. Rename " +
-                                                s"column is unsupported for complex datatype " +
-                                                s"column ${ oldCarbonColumn.getColName }")
-    }
+//    if (oldCarbonColumn.isComplex) {
+//      throw new MalformedCarbonCommandException(s"Column Rename Operation failed. Rename " +
+//                                                s"column is unsupported for complex datatype " +
+//                                                s"column ${ oldCarbonColumn.getColName }")
+//    }
 
     // if column rename operation is on bucket column, then fail the rename operation
     if (null != carbonTable.getBucketingInfo) {
@@ -84,8 +84,8 @@ private[sql] case class CarbonAlterTableColRenameDataTypeChangeCommand(
   extends CarbonAlterTableColumnRenameCommand(alterTableColRenameAndDataTypeChangeModel.columnName,
     alterTableColRenameAndDataTypeChangeModel.newColumnName) {
 
+  val LOGGER = LogServiceFactory.getLogService(this.getClass.getCanonicalName)
   override def processMetadata(sparkSession: SparkSession): Seq[Row] = {
-    val LOGGER = LogServiceFactory.getLogService(this.getClass.getCanonicalName)
     val tableName = alterTableColRenameAndDataTypeChangeModel.tableName
     val dbName = alterTableColRenameAndDataTypeChangeModel.databaseName
       .getOrElse(sparkSession.catalog.currentDatabase)
