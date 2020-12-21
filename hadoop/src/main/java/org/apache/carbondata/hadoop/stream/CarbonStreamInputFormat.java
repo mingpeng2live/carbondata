@@ -26,6 +26,7 @@ import org.apache.carbondata.core.metadata.encoder.Encoding;
 import org.apache.carbondata.core.metadata.schema.table.column.CarbonColumn;
 import org.apache.carbondata.core.metadata.schema.table.column.CarbonDimension;
 import org.apache.carbondata.core.scan.complextypes.ArrayQueryType;
+import org.apache.carbondata.core.scan.complextypes.MapQueryType;
 import org.apache.carbondata.core.scan.complextypes.PrimitiveQueryType;
 import org.apache.carbondata.core.scan.complextypes.StructQueryType;
 import org.apache.carbondata.core.scan.filter.GenericQueryType;
@@ -97,6 +98,9 @@ public class CarbonStreamInputFormat extends FileInputFormat<Void, Object> {
         } else if (DataTypes.isStructType(carbonColumns[i].getDataType())) {
           queryTypes[i] = new StructQueryType(carbonColumns[i].getColName(),
               carbonColumns[i].getColName(), i);
+        } else if (DataTypes.isMapType(carbonColumns[i].getDataType())) {
+          queryTypes[i] = new MapQueryType(carbonColumns[i].getColName(),
+                  carbonColumns[i].getColName(), i);
         } else {
           throw new UnsupportedOperationException(
               carbonColumns[i].getDataType().getName() + " is not supported");
@@ -122,7 +126,9 @@ public class CarbonStreamInputFormat extends FileInputFormat<Void, Object> {
       } else if (DataTypes.isStructType(dataType)) {
         queryType =
             new StructQueryType(child.getColName(), dimension.getColName(), ++parentColumnIndex);
-        parentQueryType.addChildren(queryType);
+      } else if (DataTypes.isMapType(dataType)) {
+        queryType =
+                new MapQueryType(child.getColName(), dimension.getColName(), ++parentColumnIndex);
       } else {
         boolean isDirectDictionary =
             CarbonUtil.hasEncoding(child.getEncoder(), Encoding.DIRECT_DICTIONARY);

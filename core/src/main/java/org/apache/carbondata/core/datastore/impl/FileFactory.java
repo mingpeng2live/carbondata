@@ -328,6 +328,14 @@ public final class FileFactory {
     return path.delete();
   }
 
+  public static boolean renameTo(String filePath, String newFilePath) throws IOException {
+    return getCarbonFile(filePath).renameTo(newFilePath);
+  }
+
+  public static boolean renameForce(String filePath, String newFilePath) throws IOException {
+    return getCarbonFile(filePath).renameForce(newFilePath);
+  }
+
   public static boolean mkdirs(String filePath) throws IOException {
     return getCarbonFile(filePath).mkdirs();
   }
