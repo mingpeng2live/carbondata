@@ -111,7 +111,7 @@ object DataTypeConverterUtil {
       case _: ArrayType =>
         field.children match {
           case Some(List(v)) =>
-            DataTypes.createArrayType(this.convertToCarbonType(v))
+            DataTypes.createArrayType(this.convertToCarbonType(v), v.name.get)
           case None =>
             CarbonException.analysisException(s"Unsupported array data type: ${field.column}")
         }
