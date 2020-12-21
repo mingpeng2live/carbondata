@@ -331,6 +331,52 @@ class CarbonFileMetastore extends CarbonMetaStore {
     }
   }
 
+  private def updateSchemaThriftFile(
+      newTableIdentifier: AbsoluteTableIdentifier,
+      oldTableIdentifier: AbsoluteTableIdentifier,
+      thriftTableInfo: TableInfo): String = {
+    if (!FileFactory.isFileExist(oldTableIdentifier.getTablePath)) {
+      throw new IOException(s"Failed to old tablePath: ${oldTableIdentifier.getTablePath} not exists")
+    }
+    // exec rename path
+    val renameFlag = FileFactory.renameForce(oldTableIdentifier.getTablePath, newTableIdentifier.getTablePath)
+    if (!renameFlag) {
+      LOGGER.warn(s"Failed to tablePath: ${oldTableIdentifier.getTablePath} rename to ${newTableIdentifier.getTablePath}")
+    }
+    val schemaFilePath = CarbonTablePath.getSchemaFilePath(newTableIdentifier.getTablePath)
+    val thriftWriter = new ThriftWriter(schemaFilePath, false)
+    thriftWriter.open(FileWriteOperation.OVERWRITE)
+    thriftWriter.write(thriftTableInfo)
+    thriftWriter.close()
+    val modifiedTime = System.currentTimeMillis()
+    FileFactory.getCarbonFile(schemaFilePath).setLastModifiedTime(modifiedTime)
+    updateSchemasUpdatedTime(newTableIdentifier.getCarbonTableIdentifier.getTableId, modifiedTime)
+    newTableIdentifier.getTablePath
+  }
+
+  /**
+   * This method will overwrite the existing schema and update it with the given details
+   */
+  def updateTableSchemaForAlterRename(
+       newTableIdentifier: AbsoluteTableIdentifier,
+       oldTableIdentifier: AbsoluteTableIdentifier,
+       thriftTableInfo: org.apache.carbondata.format.TableInfo,
+       schemaEvolutionEntry: SchemaEvolutionEntry) (sparkSession: SparkSession): String = {
+    if (schemaEvolutionEntry != null) {
+      thriftTableInfo.fact_table.schema_evolution.schema_evolution_history.add(schemaEvolutionEntry)
+    }
+    val path = updateSchemaThriftFile(newTableIdentifier, oldTableIdentifier, thriftTableInfo)
+    val schemaConverter = new ThriftWrapperSchemaConverterImpl
+    val wrapperTableInfo = schemaConverter.fromExternalToWrapperTableInfo(
+      thriftTableInfo,
+      newTableIdentifier.getDatabaseName,
+      newTableIdentifier.getTableName,
+      newTableIdentifier.getTablePath)
+//    removeTableFromMetadata(oldTableIdentifier.getDatabaseName, oldTableIdentifier.getTableName)
+    addCarbonTableToCache(wrapperTableInfo, newTableIdentifier)
+    path
+  }
+
   /**
    * This method will overwrite the existing schema and update it with the given details
    */

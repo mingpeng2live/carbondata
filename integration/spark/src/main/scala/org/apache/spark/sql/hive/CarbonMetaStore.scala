@@ -82,6 +82,20 @@ trait CarbonMetaStore {
    *
    * @param newTableIdentifier
    * @param thriftTableInfo
+   * @param schemaEvolutionEntry
+   * @param sparkSession
+   */
+  def updateTableSchemaForAlterRename(
+      newTableIdentifier: AbsoluteTableIdentifier,
+      oldTableIdentifier: AbsoluteTableIdentifier,
+      thriftTableInfo: org.apache.carbondata.format.TableInfo,
+      schemaEvolutionEntry: SchemaEvolutionEntry)(sparkSession: SparkSession): String
+
+  /**
+   * This method will overwrite the existing schema and update it with the given details
+   *
+   * @param newTableIdentifier
+   * @param thriftTableInfo
    * @param carbonStorePath
    * @param sparkSession
    */
