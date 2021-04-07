@@ -443,22 +443,14 @@ public class SegmentFileStore {
   /**
    * Move the loaded data from source folder to destination folder.
    */
-  private static void moveFromTempFolder(String source, String dest) throws IOException {
+  private static void moveFromTempFolder(String source, String dest) {
 
     CarbonFile oldFolder = FileFactory.getCarbonFile(source);
     CarbonFile[] oldFiles = oldFolder.listFiles();
     for (CarbonFile file : oldFiles) {
       file.renameForce(dest + CarbonCommonConstants.FILE_SEPARATOR + file.getName());
     }
-    // delete the segment path at any cost at first, we we dont want to delete fact directory in
-    // case of multiple load scenario or update, delete scenario
     oldFolder.delete();
-    CarbonFile partDir = FileFactory.getCarbonFile(CarbonTablePath.getPartitionDir(dest));
-    // once last segment is processed(in case of update delete), delete the main fact directory
-    if (partDir.listFiles(false).size() == 0) {
-      CarbonFile oldFactDirPath = FileFactory.getCarbonFile(CarbonTablePath.getFactDir(dest));
-      oldFactDirPath.delete();
-    }
   }
 
   /**
@@ -839,8 +831,8 @@ public class SegmentFileStore {
    * Gets all index files from this segment
    * @return
    */
-  public Map<String, String> getIndexFiles() {
-    Map<String, String> indexFiles = new HashMap<>();
+  public Set<String> getIndexFiles() {
+    Set<String> indexFiles = new HashSet<>();
     if (segmentFile != null) {
       for (Map.Entry<String, FolderDetails> entry : getLocationMap().entrySet()) {
         String location = entry.getKey();
@@ -849,8 +841,7 @@ public class SegmentFileStore {
         }
         if (entry.getValue().status.equals(SegmentStatus.SUCCESS.getMessage())) {
           for (String indexFile : entry.getValue().getFiles()) {
-            indexFiles.put(location + CarbonCommonConstants.FILE_SEPARATOR + indexFile,
-                entry.getValue().mergeFileName);
+            indexFiles.add(location + CarbonCommonConstants.FILE_SEPARATOR + indexFile);
           }
         }
       }
@@ -862,7 +853,7 @@ public class SegmentFileStore {
    * Gets all index files from this segment
    * @return
    */
-  public Map<String, String> getIndexOrMergeFiles() throws IOException {
+  public Map<String, String> getIndexAndMergeFiles() throws IOException {
     Map<String, String> indexFiles = new HashMap<>();
     if (segmentFile != null) {
       for (Map.Entry<String, FolderDetails> entry : getLocationMap().entrySet()) {
@@ -906,17 +897,9 @@ public class SegmentFileStore {
    * @return
    */
   public List<CarbonFile> getIndexCarbonFiles() {
-    Map<String, String> indexFiles = getIndexFiles();
-    Set<String> files = new HashSet<>();
-    for (Map.Entry<String, String> entry: indexFiles.entrySet()) {
-      Path path = new Path(entry.getKey());
-      files.add(entry.getKey());
-      if (entry.getValue() != null) {
-        files.add(new Path(path.getParent(), entry.getValue()).toString());
-      }
-    }
+    Set<String> indexFiles = getIndexFiles();
     List<CarbonFile> carbonFiles = new ArrayList<>();
-    for (String indexFile : files) {
+    for (String indexFile : indexFiles) {
       CarbonFile carbonFile = FileFactory.getCarbonFile(indexFile);
       if (carbonFile.exists()) {
         carbonFiles.add(carbonFile);
@@ -1133,17 +1116,23 @@ public class SegmentFileStore {
     List<String> indexOrMergeFiles = fileStore.readIndexFiles(SegmentStatus.SUCCESS, true,
         FileFactory.getConfiguration());
     Map<String, List<String>> indexFilesMap = fileStore.getIndexFilesMap();
+    List<String> deletedFiles = new ArrayList<>();
     for (Map.Entry<String, List<String>> entry : indexFilesMap.entrySet()) {
       FileFactory.deleteFile(entry.getKey());
+      deletedFiles.add(entry.getKey());
       for (String file : entry.getValue()) {
         String[] deltaFilePaths =
             updateStatusManager.getDeleteDeltaFilePath(file, segment.getSegmentNo());
         for (String deltaFilePath : deltaFilePaths) {
           FileFactory.deleteFile(deltaFilePath);
+          deletedFiles.add(deltaFilePath);
         }
         FileFactory.deleteFile(file);
+        deletedFiles.add(file);
       }
     }
+    LOGGER.info("Deleted the files: " + String.join(",", deletedFiles) + " on clean" +
+        " files operation");
     deletePhysicalPartition(partitionSpecs, indexFilesMap, indexOrMergeFiles, tablePath);
   }
 
@@ -1155,16 +1144,19 @@ public class SegmentFileStore {
    */
   private static void deletePhysicalPartition(List<PartitionSpec> partitionSpecs,
       Map<String, List<String>> locationMap, List<String> indexOrMergeFiles, String tablePath) {
+    LOGGER.info("Deleting files: ");
     for (String indexOrMergeFile : indexOrMergeFiles) {
       if (null != partitionSpecs) {
         Path location = new Path(indexOrMergeFile);
         boolean exists = pathExistsInPartitionSpec(partitionSpecs, location);
         if (!exists) {
           FileFactory.deleteAllCarbonFilesOfDir(FileFactory.getCarbonFile(location.toString()));
+          LOGGER.info(location.toString());
         }
       } else {
         Path location = new Path(indexOrMergeFile);
         FileFactory.deleteAllCarbonFilesOfDir(FileFactory.getCarbonFile(location.toString()));
+        LOGGER.info(location.toString());
       }
     }
     for (Map.Entry<String, List<String>> entry : locationMap.entrySet()) {
@@ -1207,7 +1199,7 @@ public class SegmentFileStore {
     }
   }
 
-  private static boolean pathExistsInPartitionSpec(List<PartitionSpec> partitionSpecs,
+  public static boolean pathExistsInPartitionSpec(List<PartitionSpec> partitionSpecs,
       Path partitionPath) {
     for (PartitionSpec spec : partitionSpecs) {
       if (spec.getLocation().equals(partitionPath)) {
@@ -1356,7 +1348,7 @@ public class SegmentFileStore {
     } else {
       SegmentFileStore segmentFileStore =
           new SegmentFileStore(tablePath, segment.getSegmentFileName());
-      indexFiles = segmentFileStore.getIndexOrMergeFiles().keySet();
+      indexFiles = segmentFileStore.getIndexAndMergeFiles().keySet();
     }
     return indexFiles;
   }

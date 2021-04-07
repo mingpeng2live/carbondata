@@ -66,6 +66,7 @@ import org.apache.carbondata.processing.merger.{CarbonDataMergerUtil, Compaction
 import org.apache.carbondata.processing.util.CarbonLoaderUtil
 import org.apache.carbondata.spark.MergeResultImpl
 import org.apache.carbondata.spark.load.DataLoadProcessBuilderOnSpark
+import org.apache.carbondata.spark.rdd.CarbonSparkPartition
 
 object SecondaryIndexUtil {
 
@@ -190,14 +191,16 @@ object SecondaryIndexUtil {
     var rebuiltSegments: Set[String] = Set[String]()
     val segmentIdToLoadStartTimeMap: util.Map[String, String] = new util.HashMap()
     try {
+      var siRebuildRDD: CarbonSIRebuildRDD[String, Boolean] = null
       val mergeStatus = if (SortScope.GLOBAL_SORT == indexCarbonTable.getSortScope &&
       !indexCarbonTable.getSortColumns.isEmpty) {
         mergeSISegmentDataFiles(sc.sparkSession, carbonLoadModel, carbonMergerMapping)
       } else {
-        new CarbonSIRebuildRDD(sc.sparkSession,
+        siRebuildRDD = new CarbonSIRebuildRDD(sc.sparkSession,
           new MergeResultImpl(),
           carbonLoadModel,
-          carbonMergerMapping).collect
+          carbonMergerMapping)
+        siRebuildRDD.collect
       }
       if (null != mergeStatus && mergeStatus.length == 0) {
         finalMergeStatus = true
@@ -225,6 +228,11 @@ object SecondaryIndexUtil {
             deleteOldCarbonDataFiles(carbonLoadModel.getFactTimeStamp,
               validSegmentsToUse.toList.asJava,
               indexCarbonTable)
+          } else {
+            siRebuildRDD.partitions.foreach { partition =>
+              val carbonSparkPartition = partition.asInstanceOf[CarbonSparkPartition]
+              deleteOldCarbonDataFiles(carbonSparkPartition)
+            }
           }
           mergedSegments.asScala.map { seg =>
             val file = SegmentFileStore.writeSegmentFile(
@@ -345,6 +353,18 @@ object SecondaryIndexUtil {
     }
   }
 
+  /**
+   * This method delete the carbondata files present in pertition of during small
+   * datafile merge after loading a segment to SI table. It should be deleted after
+   * data file merge operation, else, concurrency can cause file not found issues.
+   */
+  private def deleteOldCarbonDataFiles(partition: CarbonSparkPartition): Unit = {
+    val splitList = partition.split.value.getAllSplits
+    splitList.asScala.foreach { split =>
+      val carbonFile = FileFactory.getCarbonFile(split.getFilePath)
+      carbonFile.delete()
+    }
+  }
   /**
    * Identifies the group of blocks to be merged based on the merge size.
    * This should be per segment grouping.
@@ -678,9 +698,15 @@ object SecondaryIndexUtil {
       .collectionAccumulator[Map[String, SegmentMetaDataInfo]]
     validSegments.foreach { segment =>
       outputModel.setSegmentId(segment.getSegmentNo)
-      val dataFrame = SparkSQLUtil.createInputDataFrame(
+      // As this dataframe is created to merge the data files of SI segment. So no need to calculate
+      // positionReference column again, as it is already calculated during SI segment load from
+      // main table. Also set the CARBON_INPUT_SEGMENTS property to the current SI segment to be
+      // merged to avoid querying whole table.
+      val dataFrame = SecondaryIndexCreator.dataFrameOfSegments(
         sparkSession,
-        indexCarbonTable)
+        indexCarbonTable,
+        "*",
+        Array(segment.getSegmentNo))
       SecondaryIndexCreator.findCarbonScanRDD(dataFrame.rdd, null)
       val segList : java.util.List[Segment] = new util.ArrayList[Segment]()
       segList.add(segment)

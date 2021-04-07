@@ -19,21 +19,15 @@ package org.apache.carbondata.presto;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
-import static java.lang.String.format;
 import static java.util.stream.Collectors.toList;
 
 import org.apache.carbondata.core.metadata.datatype.DataType;
 import org.apache.carbondata.core.metadata.datatype.DataTypes;
-import org.apache.carbondata.core.metadata.schema.table.CarbonTable;
-import org.apache.carbondata.core.metadata.schema.table.column.ColumnSchema;
 import org.apache.carbondata.core.scan.expression.ColumnExpression;
 import org.apache.carbondata.core.scan.expression.Expression;
 import org.apache.carbondata.core.scan.expression.LiteralExpression;
@@ -50,25 +44,18 @@ import org.apache.carbondata.core.scan.expression.logical.OrExpression;
 import io.airlift.slice.Slice;
 import io.prestosql.plugin.hive.HiveColumnHandle;
 import io.prestosql.plugin.hive.HiveType;
-import io.prestosql.spi.PrestoException;
 import io.prestosql.spi.predicate.Domain;
 import io.prestosql.spi.predicate.Range;
 import io.prestosql.spi.predicate.TupleDomain;
 import io.prestosql.spi.type.Decimals;
-import io.prestosql.spi.type.Type;
 import org.apache.hadoop.hive.serde2.typeinfo.DecimalTypeInfo;
 
 import static com.google.common.base.Preconditions.checkArgument;
-import static io.prestosql.spi.StandardErrorCode.NOT_SUPPORTED;
 
 /**
  * PrestoFilterUtil create the carbonData Expression from the presto-domain
  */
 public class PrestoFilterUtil {
-
-  private static Map<Integer, Expression> filterMap = new HashMap<>();
-
-  private static final String HIVE_DEFAULT_DYNAMIC_PARTITION = "__HIVE_DEFAULT_PARTITION__";
 
   /**
    * @param columnHandle
@@ -104,80 +91,6 @@ public class PrestoFilterUtil {
     } else {
       return DataTypes.STRING;
     }
-  }
-
-  /**
-   * Return partition filters using domain constraints
-   * @param carbonTable
-   * @param originalConstraint
-   * @return
-   */
-  public static List<String> getPartitionFilters(CarbonTable carbonTable,
-      TupleDomain<HiveColumnHandle> originalConstraint) {
-    List<ColumnSchema> columnSchemas = carbonTable.getPartitionInfo().getColumnSchemaList();
-    List<String> filter = new ArrayList<>();
-    for (HiveColumnHandle columnHandle : originalConstraint.getDomains().get().keySet()) {
-      List<ColumnSchema> partitionedColumnSchema = columnSchemas.stream().filter(
-          columnSchema -> columnHandle.getName()
-              .equals(columnSchema.getColumnName())).collect(toList());
-      if (partitionedColumnSchema.size() != 0) {
-        filter.addAll(createPartitionFilters(originalConstraint, columnHandle));
-      }
-    }
-    return filter;
-  }
-
-  /** Returns list of partition key and values using domain constraints
-   * @param originalConstraint
-   * @param columnHandle
-   */
-  private static List<String> createPartitionFilters(
-      TupleDomain<HiveColumnHandle> originalConstraint, HiveColumnHandle columnHandle) {
-    List<String> filter = new ArrayList<>();
-    if (!originalConstraint.getDomains().isPresent()) {
-      return filter;
-    }
-    Domain domain = originalConstraint.getDomains().get().get(columnHandle);
-    if (domain != null && domain.isNullableSingleValue()) {
-      Object value = domain.getNullableSingleValue();
-      Type type = domain.getType();
-      if (value == null) {
-        filter.add(columnHandle.getName() + "=" + HIVE_DEFAULT_DYNAMIC_PARTITION);
-      } else if (columnHandle.getHiveType().getTypeInfo() instanceof DecimalTypeInfo) {
-        int scale = ((DecimalTypeInfo) columnHandle.getHiveType().getTypeInfo()).getScale();
-        if (value instanceof Long) {
-          //create decimal value from Long
-          BigDecimal decimalValue = new BigDecimal(new BigInteger(String.valueOf(value)), scale);
-          filter.add(columnHandle.getName() + "=" + decimalValue.toString());
-        } else if (value instanceof Slice) {
-          //create decimal value from Slice
-          BigDecimal decimalValue =
-              new BigDecimal(Decimals.decodeUnscaledValue((Slice) value), scale);
-          filter.add(columnHandle.getName() + "=" + decimalValue.toString());
-        }
-      } else if (value instanceof Slice) {
-        filter.add(columnHandle.getName() + "=" + ((Slice) value).toStringUtf8());
-      } else if (value instanceof Long && columnHandle.getHiveType()
-          .equals(HiveType.HIVE_DATE)) {
-        Calendar c = Calendar.getInstance();
-        c.setTime(new java.sql.Date(0));
-        c.add(Calendar.DAY_OF_YEAR, ((Long) value).intValue());
-        java.sql.Date date = new java.sql.Date(c.getTime().getTime());
-        filter.add(columnHandle.getName() + "=" + date.toString());
-      } else if (value instanceof Long && columnHandle.getHiveType()
-          .equals(HiveType.HIVE_TIMESTAMP)) {
-        String timeStamp = new Timestamp((Long) value).toString();
-        filter.add(columnHandle.getName() + "=" + timeStamp
-            .substring(0, timeStamp.indexOf('.')));
-      } else if ((value instanceof Boolean) || (value instanceof Double)
-          || (value instanceof Long)) {
-        filter.add(columnHandle.getName() + "=" + value.toString());
-      } else {
-        throw new PrestoException(NOT_SUPPORTED,
-            format("Unsupported partition key type: %s", type.getDisplayName()));
-      }
-    }
-    return filter;
   }
 
   /**
@@ -323,16 +236,5 @@ public class PrestoFilterUtil {
     }
 
     return rawData;
-  }
-
-  /**
-   * get the filters from key
-   */
-  static Expression getFilters(Integer key) {
-    return filterMap.get(key);
-  }
-
-  static void setFilter(Integer tableId, Expression filter) {
-    filterMap.put(tableId, filter);
   }
 }

@@ -52,7 +52,6 @@ import org.apache.carbondata.core.metadata.schema.table.TableInfo;
 import org.apache.carbondata.core.metadata.schema.table.column.ColumnSchema;
 import org.apache.carbondata.core.profiler.ExplainCollector;
 import org.apache.carbondata.core.readcommitter.ReadCommittedScope;
-import org.apache.carbondata.core.scan.expression.Expression;
 import org.apache.carbondata.core.scan.filter.FilterUtil;
 import org.apache.carbondata.core.scan.filter.resolver.FilterResolverIntf;
 import org.apache.carbondata.core.scan.model.QueryModel;
@@ -404,6 +403,10 @@ public abstract class CarbonInputFormat<T> extends FileInputFormat<Void, T> {
       }
       return indexJob.executeCountJob(indexInputFormat, configuration);
     } catch (Exception e) {
+      if (CarbonProperties.getInstance().isFallBackDisabled()) {
+        LOG.error("Fallback is disabled");
+        throw e;
+      }
       LOG.error("Failed to get count from index server. Initializing fallback", e);
       IndexJob indexJob = IndexUtil.getEmbeddedJob();
       return indexJob.executeCountJob(indexInputFormat, configuration);
@@ -682,7 +685,8 @@ public abstract class CarbonInputFormat<T> extends FileInputFormat<Void, T> {
       projectColumns = new String[]{};
     }
     if (indexFilter != null) {
-      checkAndAddImplicitExpression(indexFilter.getExpression(), inputSplit);
+      boolean hasColumnDrift = carbonTable.isTransactionalTable() && carbonTable.hasColumnDrift();
+      checkAndAddImplicitExpression(indexFilter, inputSplit, hasColumnDrift);
     }
     QueryModel queryModel = new QueryModelBuilder(carbonTable)
         .projectColumns(projectColumns)
@@ -700,7 +704,8 @@ public abstract class CarbonInputFormat<T> extends FileInputFormat<Void, T> {
    * This method will create an Implicit Expression and set it as right child in the given
    * expression
    */
-  private void checkAndAddImplicitExpression(Expression expression, InputSplit inputSplit) {
+  private void checkAndAddImplicitExpression(IndexFilter indexFilter, InputSplit inputSplit,
+      boolean hasColumnDrift) {
     if (inputSplit instanceof CarbonMultiBlockSplit) {
       CarbonMultiBlockSplit split = (CarbonMultiBlockSplit) inputSplit;
       List<CarbonInputSplit> splits = split.getAllSplits();
@@ -717,8 +722,13 @@ public abstract class CarbonInputFormat<T> extends FileInputFormat<Void, T> {
       }
       if (!blockIdToBlockletIdMapping.isEmpty()) {
         // create implicit expression and set as right child
-        FilterUtil
-            .createImplicitExpressionAndSetAsRightChild(expression, blockIdToBlockletIdMapping);
+        FilterUtil.createImplicitExpressionAndSetAsRightChild(indexFilter.getExpression(),
+            blockIdToBlockletIdMapping);
+        // process filter expression after adding implicit expression. If hasColumnDrift is false,
+        // then the filter expression will be processed during QueryModelBuilder.build()
+        if (hasColumnDrift) {
+          indexFilter.processFilterExpression();
+        }
       }
     }
   }

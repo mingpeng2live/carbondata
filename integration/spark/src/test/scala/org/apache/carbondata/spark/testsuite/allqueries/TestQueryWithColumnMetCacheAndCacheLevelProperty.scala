@@ -18,6 +18,7 @@ package org.apache.carbondata.spark.testsuite.allqueries
 
 import scala.collection.JavaConverters._
 
+import mockit.{Mock, MockUp}
 import org.apache.hadoop.conf.Configuration
 import org.apache.spark.sql.{CarbonEnv, Row}
 import org.apache.spark.sql.hive.CarbonRelation
@@ -31,6 +32,7 @@ import org.apache.carbondata.core.indexstore.Blocklet
 import org.apache.carbondata.core.indexstore.blockletindex.{BlockIndex, BlockletIndex, BlockletIndexRowIndexes}
 import org.apache.carbondata.core.indexstore.schema.CarbonRowSchema
 import org.apache.carbondata.core.metadata.datatype.DataTypes
+import org.apache.carbondata.core.metadata.schema.table.{CarbonTable, TableInfo}
 import org.apache.carbondata.core.metadata.schema.table.column.CarbonDimension
 import org.apache.carbondata.core.readcommitter.TableStatusReadCommittedScope
 import org.apache.carbondata.core.scan.expression.{ColumnExpression, LiteralExpression}
@@ -350,7 +352,7 @@ class TestQueryWithColumnMetCacheAndCacheLevelProperty
     sql("DROP table IF EXISTS carbonCahe")
   }
 
-  test("Test query with parallel index load") {
+  test("Test query with parallel index load with and without index") {
     CarbonProperties.getInstance()
       .addProperty(CarbonCommonConstants.CARBON_LOAD_INDEXES_PARALLEL, "true")
     sql("CREATE table parallel_index_load (a STRING, b STRING, c INT) STORED AS carbondata")
@@ -359,5 +361,19 @@ class TestQueryWithColumnMetCacheAndCacheLevelProperty
     sql("insert into parallel_index_load select 'ee', 'ff', 3")
     sql("select a, b from parallel_index_load").collect()
     assert(sql("select a, b from parallel_index_load").count() == 3)
+    sql("drop index if exists parallel_index on parallel_index_load")
+    sql("CREATE INDEX parallel_index on parallel_index_load(b) AS 'carbondata'")
+    checkAnswer(sql("select b from parallel_index"), Seq(Row("bb"), Row("dd"), Row("ff")))
+    sql("drop index if exists parallel_index on parallel_index_load")
+    val mock: MockUp[TableInfo] = new MockUp[TableInfo] {
+      @Mock
+      def isSchemaModified(): Boolean = {
+        true
+      }
+    }
+    sql("CREATE INDEX parallel_index on parallel_index_load(b) AS 'carbondata'")
+    checkAnswer(sql("select b from parallel_index"), Seq(Row("bb"), Row("dd"), Row("ff")))
+    sql("drop index if exists parallel_index on parallel_index_load")
+    mock.tearDown()
   }
 }

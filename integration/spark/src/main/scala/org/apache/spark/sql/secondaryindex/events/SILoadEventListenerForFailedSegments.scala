@@ -27,7 +27,6 @@ import org.apache.spark.sql.index.CarbonIndexUtil
 
 import org.apache.carbondata.common.logging.LogServiceFactory
 import org.apache.carbondata.core.metadata.index.IndexType
-import org.apache.carbondata.core.statusmanager.SegmentStatusManager
 import org.apache.carbondata.core.util.CarbonProperties
 import org.apache.carbondata.events.{Event, OperationContext, OperationEventListener}
 import org.apache.carbondata.processing.loading.events.LoadEvents.LoadTablePostStatusUpdateEvent
@@ -49,6 +48,11 @@ class SILoadEventListenerForFailedSegments extends OperationEventListener with L
           val loadTablePostStatusUpdateEvent = event.asInstanceOf[LoadTablePostStatusUpdateEvent]
           val carbonLoadModel = loadTablePostStatusUpdateEvent.getCarbonLoadModel
           val sparkSession = SparkSession.getActiveSession.get
+          // Avoid loading segment to SI for add load command
+          if (operationContext.getProperty("isAddLoad") != null &&
+            operationContext.getProperty("isAddLoad").toString.toBoolean) {
+            return
+          }
           if (CarbonProperties.getInstance().isSIRepairEnabled(carbonLoadModel.getDatabaseName,
             carbonLoadModel.getTableName)) {
           // when Si creation and load to main table are parallel, get the carbonTable from the
@@ -70,13 +74,11 @@ class SILoadEventListenerForFailedSegments extends OperationEventListener with L
               carbonLoadModel.getTableName + " are : " + maxSegmentRepairLimit)
             // if there are no index tables for a given fact table do not perform any action
             if (indexTables.nonEmpty) {
-              val mainTableDetails =
-                SegmentStatusManager.readLoadMetadata(carbonTable.getMetadataPath)
               indexTables.foreach {
                 indexTableName =>
                   CarbonIndexUtil.processSIRepair(indexTableName, carbonTable, carbonLoadModel,
-                    indexMetadata, mainTableDetails.toList, secondaryIndexProvider,
-                    maxSegmentRepairLimit)(sparkSession)
+                    indexMetadata, secondaryIndexProvider,
+                    maxSegmentRepairLimit, isLoadOrCompaction = true)(sparkSession)
               }
             }
           }

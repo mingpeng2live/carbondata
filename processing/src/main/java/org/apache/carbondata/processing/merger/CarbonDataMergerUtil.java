@@ -824,9 +824,9 @@ public final class CarbonDataMergerUtil {
       //check if this load is an already merged load.
       if (null != segment.getMergedLoadName()) {
         segments
-            .add(Segment.getSegment(segment.getMergedLoadName(), segment.getSegmentFile(), null));
+            .add(new Segment(segment.getMergedLoadName(), segment.getSegmentFile(), null, segment));
       } else {
-        segments.add(Segment.getSegment(segment.getLoadName(), segment.getSegmentFile(), null));
+        segments.add(new Segment(segment.getLoadName(), segment.getSegmentFile(), null, segment));
       }
     }
     return segments;
@@ -1072,7 +1072,7 @@ public final class CarbonDataMergerUtil {
       } else return false;
     }
 
-    CarbonUpdateUtil.updateSegmentStatus(segmentUpdateDetails, table, timestamp, true);
+    CarbonUpdateUtil.updateSegmentStatus(segmentUpdateDetails, table, timestamp, true, false);
 
     // Update the Table Status.
     String metaDataFilepath = table.getMetadataPath();

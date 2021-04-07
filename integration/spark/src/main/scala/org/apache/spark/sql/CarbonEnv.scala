@@ -19,6 +19,7 @@ package org.apache.spark.sql
 
 import java.util.concurrent.ConcurrentHashMap
 
+import org.apache.hadoop.fs.Path
 import org.apache.spark.internal.config.ConfigEntry
 import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.analysis.{NoSuchDatabaseException, NoSuchTableException}
@@ -38,7 +39,7 @@ import org.apache.carbondata.core.metadata.{AbsoluteTableIdentifier, CarbonMetad
 import org.apache.carbondata.core.metadata.schema.table.CarbonTable
 import org.apache.carbondata.core.util._
 import org.apache.carbondata.events._
-import org.apache.carbondata.geo.InPolygonUDF
+import org.apache.carbondata.geo.GeoUdfRegister
 import org.apache.carbondata.index.{TextMatchMaxDocUDF, TextMatchUDF}
 import org.apache.carbondata.processing.loading.events.LoadEvents.{LoadTablePostExecutionEvent, LoadTablePostStatusUpdateEvent, LoadTablePreExecutionEvent, LoadTablePreStatusUpdateEvent}
 import org.apache.carbondata.spark.rdd.SparkReadSupport
@@ -94,7 +95,12 @@ class CarbonEnv {
     // TODO: move it to proper place, it should be registered by indexSchema implementation
     sparkSession.udf.register("text_match", new TextMatchUDF)
     sparkSession.udf.register("text_match_with_limit", new TextMatchMaxDocUDF)
-    sparkSession.udf.register("in_polygon", new InPolygonUDF)
+
+    // register udf for spatial index filters of querying
+    GeoUdfRegister.registerQueryFilterUdf(sparkSession)
+
+    // register udf for spatial index utils
+    GeoUdfRegister.registerUtilUdf(sparkSession)
 
     // register udf for materialized view
     sparkSession.udf.register(MVFunctions.DUMMY_FUNCTION, () => "")
@@ -378,14 +384,15 @@ object CarbonEnv {
       isExternal: Boolean,
       isTransactionalTable: Boolean
   )(sparkSession: SparkSession): String = {
-    val path = location.getOrElse(
+    var tmpPath = location.getOrElse(
       CarbonEnv.newTablePath(databaseNameOp, tableName)(sparkSession))
     if (!isExternal && isTransactionalTable && location.isEmpty &&
-        (FileFactory.getCarbonFile(path).exists() || EnvHelper.isLegacy(sparkSession))) {
-      path + "_" + tableId
-    } else {
-      path
+        (FileFactory.getCarbonFile(tmpPath).exists() || EnvHelper.isLegacy(sparkSession))) {
+      tmpPath = tmpPath + "_" + tableId
     }
+    val path = new Path(tmpPath)
+    val fs = path.getFileSystem(sparkSession.sparkContext.hadoopConfiguration)
+    fs.makeQualified(path).toString
   }
 
   def getIdentifier(

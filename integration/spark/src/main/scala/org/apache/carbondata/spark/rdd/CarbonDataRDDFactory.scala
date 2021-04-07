@@ -315,7 +315,8 @@ object CarbonDataRDDFactory {
     try {
       if (!carbonLoadModel.isCarbonTransactionalTable || segmentLock.lockWithRetries()) {
         if (updateModel.isDefined && dataFrame.get.rdd.isEmpty()) {
-          // if the rowToBeUpdated is empty, do nothing
+          // if the rowToBeUpdated is empty, mark created segment as marked for delete and return
+          CarbonLoaderUtil.updateTableStatusForFailure(carbonLoadModel, "")
         } else {
           status = if (scanResultRdd.isDefined) {
             val colSchema = carbonLoadModel
@@ -740,7 +741,7 @@ object CarbonDataRDDFactory {
         updateModel.get.deletedSegments.asJava)
     }
     done = done && CarbonLoaderUtil.recordNewLoadMetadata(metadataDetails, carbonLoadModel, false,
-      overwriteTable, uuid)
+      overwriteTable, uuid, false)
     if (!done) {
       val errorMessage = s"Dataload failed due to failure in table status updation for" +
                          s" ${carbonLoadModel.getTableName}"

@@ -119,6 +119,19 @@ class TestIndexRepair extends QueryTest with BeforeAndAfterAll {
     sql("drop table if exists maintable")
   }
 
+  test("reindex command with stale files") {
+    sql("drop table if exists maintable")
+    sql("CREATE TABLE maintable(a INT, b STRING, c STRING) stored as carbondata")
+    sql("CREATE INDEX indextable1 on table maintable(c) as 'carbondata'")
+    sql("INSERT INTO maintable SELECT 1,'string1', 'string2'")
+    sql("INSERT INTO maintable SELECT 1,'string1', 'string2'")
+    sql("INSERT INTO maintable SELECT 1,'string1', 'string2'")
+    sql("DELETE FROM TABLE INDEXTABLE1 WHERE SEGMENT.ID IN(0,1,2)")
+    sql("REINDEX INDEX TABLE indextable1 ON MAINTABLE WHERE SEGMENT.ID IN (0,1)")
+    assert(sql("select * from maintable where c = 'string2'").count() == 2)
+    sql("drop table if exists maintable")
+  }
+
   test("insert command after deleting segments from SI table") {
     sql("drop table if exists maintable")
     sql("CREATE TABLE maintable(a INT, b STRING, c STRING) stored as carbondata")
@@ -181,15 +194,22 @@ class TestIndexRepair extends QueryTest with BeforeAndAfterAll {
     sql("CLEAN FILES FOR TABLE INDEXTABLE1 options('force'='true')")
     sql("DELETE FROM TABLE INDEXTABLE2 WHERE SEGMENT.ID IN(1)")
     sql("CLEAN FILES FOR TABLE INDEXTABLE2 options('force'='true')")
-    val postDeleteSegmentsIndexOne = sql("SHOW SEGMENTS FOR TABLE INDEXTABLE1").count()
+    var postDeleteSegmentsIndexOne = sql("SHOW SEGMENTS FOR TABLE INDEXTABLE1").count()
     val postDeleteSegmentsIndexTwo = sql("SHOW SEGMENTS FOR TABLE INDEXTABLE2").count()
     assert(preDeleteSegments != postDeleteSegmentsIndexOne)
     assert(preDeleteSegments != postDeleteSegmentsIndexTwo)
     sql("REINDEX ON TABLE MAINTABLE WHERE SEGMENT.ID IN(0,1)")
-    val postRepairSegmentsIndexOne = sql("SHOW SEGMENTS FOR TABLE INDEXTABLE1").count()
+    var postRepairSegmentsIndexOne = sql("SHOW SEGMENTS FOR TABLE INDEXTABLE1").count()
     val postRepairSegmentsIndexTwo = sql("SHOW SEGMENTS FOR TABLE INDEXTABLE2").count()
     assert(preDeleteSegments == postRepairSegmentsIndexOne)
     assert(preDeleteSegments == postRepairSegmentsIndexTwo)
+    sql("DELETE FROM TABLE INDEXTABLE1 WHERE SEGMENT.STARTTIME BEFORE '2099-01-01 01:00:00'")
+    sql("CLEAN FILES FOR TABLE INDEXTABLE1 options('force'='true')")
+    postDeleteSegmentsIndexOne = sql("SHOW SEGMENTS FOR TABLE INDEXTABLE1").count()
+    assert(preDeleteSegments != postDeleteSegmentsIndexOne)
+    sql("REINDEX ON TABLE MAINTABLE WHERE SEGMENT.ID IN(0,1)")
+    postRepairSegmentsIndexOne = sql("SHOW SEGMENTS FOR TABLE INDEXTABLE1").count()
+    assert(preDeleteSegments == postRepairSegmentsIndexOne)
     sql("drop table if exists maintable")
   }
 

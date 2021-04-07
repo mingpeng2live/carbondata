@@ -16,19 +16,27 @@
  */
 package org.apache.carbondata.spark.testsuite.mergedata
 
-import java.io.{File, PrintWriter}
+import java.io.{File, IOException, PrintWriter}
+import java.util
 
-import scala.util.Random
-
-import org.apache.spark.sql.CarbonEnv
+import mockit.{Mock, MockUp}
+import org.apache.hadoop.conf.Configuration
+import org.apache.spark.sql.{AnalysisException, CarbonEnv}
 import org.apache.spark.sql.test.util.QueryTest
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
+import scala.util.Random
 
 import org.apache.carbondata.core.constants.CarbonCommonConstants
 import org.apache.carbondata.core.datastore.filesystem.{CarbonFile, CarbonFileFilter}
 import org.apache.carbondata.core.datastore.impl.FileFactory
+import org.apache.carbondata.core.metadata.blocklet.DataFileFooter
+import org.apache.carbondata.core.metadata.schema.table.CarbonTable
+import org.apache.carbondata.core.scan.expression.Expression
+import org.apache.carbondata.core.scan.result.iterator.RawResultIterator
 import org.apache.carbondata.core.util.CarbonProperties
 import org.apache.carbondata.core.util.path.CarbonTablePath
+import org.apache.carbondata.processing.merger.{CarbonCompactionExecutor, CarbonCompactionUtil}
+import org.apache.carbondata.spark.testsuite.secondaryindex.TestSecondaryIndexUtils
 import org.apache.carbondata.spark.testsuite.secondaryindex.TestSecondaryIndexUtils.isFilterPushedDownToSI
 
 class CarbonDataFileMergeTestCaseOnSI
@@ -93,17 +101,7 @@ class CarbonDataFileMergeTestCaseOnSI
   test("Verify command of data file merge") {
     CarbonProperties.getInstance()
       .addProperty(CarbonCommonConstants.CARBON_SI_SEGMENT_MERGE, "false")
-    sql("DROP TABLE IF EXISTS nonindexmerge")
-    sql(
-      """
-        | CREATE TABLE nonindexmerge(id INT, name STRING, city STRING, age INT)
-        | STORED AS carbondata
-        | TBLPROPERTIES('SORT_COLUMNS'='city,name', 'SORT_SCOPE'='GLOBAL_SORT')
-      """.stripMargin)
-    sql(s"LOAD DATA LOCAL INPATH '$file2' INTO TABLE nonindexmerge OPTIONS('header'='false', " +
-        s"'GLOBAL_SORT_PARTITIONS'='20')")
-    sql(s"LOAD DATA LOCAL INPATH '$file2' INTO TABLE nonindexmerge OPTIONS('header'='false', " +
-        s"'GLOBAL_SORT_PARTITIONS'='20')")
+    createTableAndLoadData("20", 2)
     val rows = sql("""Select count(*) from nonindexmerge where name='n164419'""").collect()
     sql(
       "CREATE INDEX nonindexmerge_index1 on table nonindexmerge (name) AS 'carbondata' " +
@@ -120,17 +118,7 @@ class CarbonDataFileMergeTestCaseOnSI
   test("Verify command of data file merge on segments") {
     CarbonProperties.getInstance()
       .addProperty(CarbonCommonConstants.CARBON_SI_SEGMENT_MERGE, "false")
-    sql("DROP TABLE IF EXISTS nonindexmerge")
-    sql(
-      """
-        | CREATE TABLE nonindexmerge(id INT, name STRING, city STRING, age INT)
-        | STORED AS carbondata
-        | TBLPROPERTIES('SORT_COLUMNS'='city,name', 'SORT_SCOPE'='GLOBAL_SORT')
-      """.stripMargin)
-    sql(s"LOAD DATA LOCAL INPATH '$file2' INTO TABLE nonindexmerge OPTIONS('header'='false', " +
-        s"'GLOBAL_SORT_PARTITIONS'='20')")
-    sql(s"LOAD DATA LOCAL INPATH '$file2' INTO TABLE nonindexmerge OPTIONS('header'='false', " +
-        s"'GLOBAL_SORT_PARTITIONS'='20')")
+    createTableAndLoadData("20", 2)
     val rows = sql("""Select count(*) from nonindexmerge where name='n164419'""").collect()
     sql(
     "CREATE INDEX nonindexmerge_index2 on table nonindexmerge (name) AS 'carbondata' " +
@@ -152,18 +140,10 @@ class CarbonDataFileMergeTestCaseOnSI
   test("Verify command of REFRESH INDEX command with invalid segments") {
     CarbonProperties.getInstance()
       .addProperty(CarbonCommonConstants.CARBON_SI_SEGMENT_MERGE, "false")
-    sql("DROP TABLE IF EXISTS nonindexmerge")
-    sql(
-      """
-        | CREATE TABLE nonindexmerge(id INT, name STRING, city STRING, age INT)
-        | STORED AS carbondata
-        | TBLPROPERTIES('SORT_COLUMNS'='city,name', 'SORT_SCOPE'='GLOBAL_SORT')
-      """.stripMargin)
+    createTableAndLoadData("20", 1)
     sql(
       "CREATE INDEX nonindexmerge_index2 on table nonindexmerge (name) AS 'carbondata' " +
       "properties('table_blocksize'='1')")
-    sql(s"LOAD DATA LOCAL INPATH '$file2' INTO TABLE nonindexmerge OPTIONS('header'='false', " +
-        s"'GLOBAL_SORT_PARTITIONS'='20')")
     CarbonProperties.getInstance()
       .addProperty(CarbonCommonConstants.CARBON_SI_SEGMENT_MERGE, "true")
     val exceptionMessage = intercept[RuntimeException] {
@@ -177,17 +157,7 @@ class CarbonDataFileMergeTestCaseOnSI
     CarbonProperties.getInstance()
       .addProperty(CarbonCommonConstants.COMPACTION_SEGMENT_LEVEL_THRESHOLD, "2,2")
       .addProperty(CarbonCommonConstants.CARBON_SI_SEGMENT_MERGE, "false")
-    sql("DROP TABLE IF EXISTS nonindexmerge")
-    sql(
-      """
-        | CREATE TABLE nonindexmerge(id INT, name STRING, city STRING, age INT)
-        | STORED AS carbondata
-        | TBLPROPERTIES('SORT_COLUMNS'='city,name', 'SORT_SCOPE'='GLOBAL_SORT')
-      """.stripMargin)
-    sql(s"LOAD DATA LOCAL INPATH '$file2' INTO TABLE nonindexmerge OPTIONS('header'='false', " +
-        s"'GLOBAL_SORT_PARTITIONS'='20')")
-    sql(s"LOAD DATA LOCAL INPATH '$file2' INTO TABLE nonindexmerge OPTIONS('header'='false', " +
-        s"'GLOBAL_SORT_PARTITIONS'='20')")
+    createTableAndLoadData("20", 2)
     val rows = sql("""Select count(*) from nonindexmerge where name='n164419'""").collect()
     sql(
     "CREATE INDEX nonindexmerge_index3 on table nonindexmerge (name) AS 'carbondata' " +
@@ -200,6 +170,7 @@ class CarbonDataFileMergeTestCaseOnSI
     CarbonProperties.getInstance()
       .addProperty(CarbonCommonConstants.COMPACTION_SEGMENT_LEVEL_THRESHOLD,
         CarbonCommonConstants.DEFAULT_SEGMENT_LEVEL_THRESHOLD)
+        .addProperty(CarbonCommonConstants.CARBON_SI_SEGMENT_MERGE, "true")
   }
 
   test("Verify index data file merge for compacted segments") {
@@ -207,21 +178,7 @@ class CarbonDataFileMergeTestCaseOnSI
       .addProperty(CarbonCommonConstants.COMPACTION_SEGMENT_LEVEL_THRESHOLD, "2,2")
       .addProperty(CarbonCommonConstants.ENABLE_AUTO_LOAD_MERGE, "true")
       .addProperty(CarbonCommonConstants.CARBON_SI_SEGMENT_MERGE, "true")
-    sql("DROP TABLE IF EXISTS nonindexmerge")
-    sql(
-      """
-        | CREATE TABLE nonindexmerge(id INT, name STRING, city STRING, age INT)
-        | STORED AS carbondata
-        | TBLPROPERTIES('SORT_COLUMNS'='city,name', 'SORT_SCOPE'='GLOBAL_SORT')
-      """.stripMargin)
-    sql(s"LOAD DATA LOCAL INPATH '$file2' INTO TABLE nonindexmerge OPTIONS('header'='false', " +
-        s"'GLOBAL_SORT_PARTITIONS'='20')")
-    sql(s"LOAD DATA LOCAL INPATH '$file2' INTO TABLE nonindexmerge OPTIONS('header'='false', " +
-        s"'GLOBAL_SORT_PARTITIONS'='20')")
-    sql(s"LOAD DATA LOCAL INPATH '$file2' INTO TABLE nonindexmerge OPTIONS('header'='false', " +
-        s"'GLOBAL_SORT_PARTITIONS'='20')")
-    sql(s"LOAD DATA LOCAL INPATH '$file2' INTO TABLE nonindexmerge OPTIONS('header'='false', " +
-        s"'GLOBAL_SORT_PARTITIONS'='20')")
+    createTableAndLoadData("20", 4)
     val rows = sql("""Select count(*) from nonindexmerge where name='n164419'""").collect()
     sql(
     "CREATE INDEX nonindexmerge_index4 on table nonindexmerge (name) AS 'carbondata' " +
@@ -239,31 +196,44 @@ class CarbonDataFileMergeTestCaseOnSI
     "CARBON_SI_SEGMENT_MERGE property is enabled") {
     CarbonProperties.getInstance()
       .addProperty(CarbonCommonConstants.CARBON_SI_SEGMENT_MERGE, "true")
-    sql("DROP TABLE IF EXISTS nonindexmerge")
-    sql(
-      """
-        | CREATE TABLE nonindexmerge(id INT, name STRING, city STRING, age INT)
-        | STORED AS carbondata
-        | TBLPROPERTIES('SORT_COLUMNS'='city,name', 'SORT_SCOPE'='GLOBAL_SORT')
-      """.stripMargin)
-    sql(s"LOAD DATA LOCAL INPATH '$file2' INTO TABLE nonindexmerge OPTIONS('header'='false', " +
-      s"'GLOBAL_SORT_PARTITIONS'='100')")
-    sql(s"LOAD DATA LOCAL INPATH '$file2' INTO TABLE nonindexmerge OPTIONS('header'='false', " +
-      s"'GLOBAL_SORT_PARTITIONS'='100')")
+    createTableAndLoadData("100", 2)
+    val rows = sql(" select count(*) from nonindexmerge").collect()
     sql("CREATE INDEX nonindexmerge_index1 on table nonindexmerge (name) AS 'carbondata' " +
         "properties('table_blocksize'='1', 'SORT_SCOPE'='GLOBAL_SORT')")
+    // number of rows in main table and SI should be same
+    checkAnswer(sql(" select count(*) from nonindexmerge_index1"), rows)
    val df1 = sql("""Select * from nonindexmerge where name='n16000'""")
      .queryExecution.sparkPlan
     assert(isFilterPushedDownToSI(df1))
     assert(getDataFileCount("nonindexmerge_index1", "0") < 15)
     assert(getDataFileCount("nonindexmerge_index1", "1") < 15)
-    CarbonProperties.getInstance().addProperty(CarbonCommonConstants.CARBON_SI_SEGMENT_MERGE,
-      CarbonCommonConstants.CARBON_SI_SEGMENT_MERGE_DEFAULT)
   }
 
   test("Verify REFRESH INDEX command with sort scope as global sort") {
     CarbonProperties.getInstance()
       .addProperty(CarbonCommonConstants.CARBON_SI_SEGMENT_MERGE, "false")
+    createTableAndLoadData("100", 2)
+    val rows = sql(" select count(*) from nonindexmerge").collect()
+    sql("CREATE INDEX nonindexmerge_index1 on table nonindexmerge (name) AS 'carbondata' " +
+      "properties('table_blocksize'='1', 'SORT_SCOPE'='GLOBAL_SORT')")
+    val result = sql(" select positionReference from nonindexmerge_index1 where name = 'n16010'")
+      .collect()
+    sql("REFRESH INDEX nonindexmerge_index1 ON TABLE nonindexmerge").collect()
+    // value of positionReference column should be same before and after merge
+    checkAnswer(sql(" select positionReference from nonindexmerge_index1 where name = 'n16010'"),
+      result)
+    // number of rows in main table and SI should be same
+    checkAnswer(sql(" select count(*) from nonindexmerge_index1"), rows)
+    val df1 = sql("""Select * from nonindexmerge where name='n16000'""")
+      .queryExecution.sparkPlan
+    assert(isFilterPushedDownToSI(df1))
+    assert(getDataFileCount("nonindexmerge_index1", "0") < 15)
+    assert(getDataFileCount("nonindexmerge_index1", "1") < 15)
+    CarbonProperties.getInstance().addProperty(CarbonCommonConstants
+        .CARBON_SI_SEGMENT_MERGE, "true")
+  }
+
+  def createTableAndLoadData(globalSortPartition: String, loadTimes: Int): Unit = {
     sql("DROP TABLE IF EXISTS nonindexmerge")
     sql(
       """
@@ -271,20 +241,88 @@ class CarbonDataFileMergeTestCaseOnSI
         | STORED AS carbondata
         | TBLPROPERTIES('SORT_COLUMNS'='city,name', 'SORT_SCOPE'='GLOBAL_SORT')
       """.stripMargin)
-    sql(s"LOAD DATA LOCAL INPATH '$file2' INTO TABLE nonindexmerge OPTIONS('header'='false', " +
-      s"'GLOBAL_SORT_PARTITIONS'='100')")
-    sql(s"LOAD DATA LOCAL INPATH '$file2' INTO TABLE nonindexmerge OPTIONS('header'='false', " +
-      s"'GLOBAL_SORT_PARTITIONS'='100')")
-    sql("CREATE INDEX nonindexmerge_index1 on table nonindexmerge (name) AS 'carbondata' " +
-      "properties('table_blocksize'='1', 'SORT_SCOPE'='GLOBAL_SORT')")
-    sql("REFRESH INDEX nonindexmerge_index1 ON TABLE nonindexmerge").collect()
-    val df1 = sql("""Select * from nonindexmerge where name='n16000'""")
+    for (_ <- 0 until loadTimes) {
+      sql(s"LOAD DATA LOCAL INPATH '$file2' INTO TABLE nonindexmerge OPTIONS('header'='false', " +
+          s"'GLOBAL_SORT_PARTITIONS'='$globalSortPartition')")
+    }
+  }
+
+  test("test verify data file merge when exception occurred in rebuild segment") {
+    CarbonProperties.getInstance()
+      .addProperty(CarbonCommonConstants.CARBON_SI_SEGMENT_MERGE, "false")
+    createTableAndLoadData("100", 2)
+    val rows = sql(" select count(*) from nonindexmerge").collect()
+    sql("CREATE INDEX nonindexmerge_index1 on table nonindexmerge (name) AS 'carbondata'")
+    // when merge data file will throw the exception
+    val mock1 = TestSecondaryIndexUtils.mockDataFileMerge()
+    val ex = intercept[RuntimeException] {
+      sql("REFRESH INDEX nonindexmerge_index1 ON TABLE nonindexmerge").collect()
+    }
+    mock1.tearDown()
+    assert(ex.getMessage.contains("An exception occurred while merging data files in SI"))
+    var df1 = sql("""Select * from nonindexmerge where name='n16000'""")
       .queryExecution.sparkPlan
+    assert(isFilterPushedDownToSI(df1))
+    assert(getDataFileCount("nonindexmerge_index1", "0") == 100)
+    assert(getDataFileCount("nonindexmerge_index1", "1") == 100)
+    // not able to acquire lock on table
+    val mock2 = TestSecondaryIndexUtils.mockTableLock()
+    val exception = intercept[AnalysisException] {
+      sql("REFRESH INDEX nonindexmerge_index1 ON TABLE nonindexmerge").collect()
+    }
+    mock2.tearDown()
+    assert(exception.getMessage.contains("Table is already locked for compaction. " +
+      "Please try after some time."))
+    df1 = sql("""Select * from nonindexmerge where name='n16000'""")
+      .queryExecution.sparkPlan
+    assert(getDataFileCount("nonindexmerge_index1", "0") == 100)
+    assert(getDataFileCount("nonindexmerge_index1", "1") == 100)
+
+    // exception is thrown by compaction executor
+    val mock3: MockUp[CarbonCompactionExecutor] = new MockUp[CarbonCompactionExecutor]() {
+      @Mock
+      def processTableBlocks(configuration: Configuration, filterExpr: Expression):
+      util.Map[String, util.List[RawResultIterator]] = {
+        throw new IOException("An exception occurred while compaction executor.")
+      }
+    }
+    val exception2 = intercept[Exception] {
+      sql("REFRESH INDEX nonindexmerge_index1 ON TABLE nonindexmerge").collect()
+    }
+    mock3.tearDown()
+    assert(exception2.getMessage.contains("Merge data files Failure in Merger Rdd."))
+    df1 = sql("""Select * from nonindexmerge where name='n16000'""")
+        .queryExecution.sparkPlan
+    assert(isFilterPushedDownToSI(df1))
+    assert(getDataFileCount("nonindexmerge_index1", "0") == 100)
+    assert(getDataFileCount("nonindexmerge_index1", "1") == 100)
+    checkAnswer(sql(" select count(*) from nonindexmerge_index1"), rows)
+    CarbonProperties.getInstance().addProperty(CarbonCommonConstants
+        .CARBON_SI_SEGMENT_MERGE, "true")
+  }
+
+  test("test refresh index command when block need to be sorted") {
+    CarbonProperties.getInstance()
+        .addProperty(CarbonCommonConstants.CARBON_SI_SEGMENT_MERGE, "false")
+    createTableAndLoadData("100", 2)
+    val rows = sql(" select count(*) from nonindexmerge").collect()
+    sql("CREATE INDEX nonindexmerge_index1 on table nonindexmerge (name) AS 'carbondata'")
+    val mock: MockUp[CarbonCompactionUtil] = new MockUp[CarbonCompactionUtil]() {
+      @Mock
+      def isSortedByCurrentSortColumns(table: CarbonTable, footer: DataFileFooter): Boolean = {
+        false
+      }
+    }
+    sql("REFRESH INDEX nonindexmerge_index1 ON TABLE nonindexmerge").collect()
+    mock.tearDown()
+    val df1 = sql("""Select * from nonindexmerge where name='n16000'""")
+        .queryExecution.sparkPlan
     assert(isFilterPushedDownToSI(df1))
     assert(getDataFileCount("nonindexmerge_index1", "0") < 15)
     assert(getDataFileCount("nonindexmerge_index1", "1") < 15)
-    CarbonProperties.getInstance().addProperty(CarbonCommonConstants.CARBON_SI_SEGMENT_MERGE,
-      CarbonCommonConstants.CARBON_SI_SEGMENT_MERGE_DEFAULT)
+    checkAnswer(sql(" select count(*) from nonindexmerge_index1"), rows)
+    CarbonProperties.getInstance().addProperty(CarbonCommonConstants
+        .CARBON_SI_SEGMENT_MERGE, "true")
   }
 
   private def getDataFileCount(tableName: String, segment: String): Int = {

@@ -27,6 +27,7 @@ import java.io.OutputStreamWriter;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -34,6 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 import org.apache.carbondata.common.annotations.InterfaceAudience;
 import org.apache.carbondata.common.logging.LogServiceFactory;
@@ -45,7 +47,6 @@ import org.apache.carbondata.core.fileoperations.AtomicFileOperationFactory;
 import org.apache.carbondata.core.fileoperations.AtomicFileOperations;
 import org.apache.carbondata.core.fileoperations.FileWriteOperation;
 import org.apache.carbondata.core.locks.CarbonLockFactory;
-import org.apache.carbondata.core.locks.CarbonLockUtil;
 import org.apache.carbondata.core.locks.ICarbonLock;
 import org.apache.carbondata.core.locks.LockUsage;
 import org.apache.carbondata.core.metadata.schema.table.CarbonTable;
@@ -246,7 +247,7 @@ public class MVProvider {
         LOG.info("Materialized view status lock has been successfully acquired.");
         if (status == MVStatus.ENABLED) {
           // Enable mv only if mv tables and main table are in sync
-          if (!isViewCanBeEnabled(schemaList.get(0))) {
+          if (!isViewCanBeEnabled(schemaList.get(0), false)) {
             return;
           }
         }
@@ -290,7 +291,7 @@ public class MVProvider {
       }
     } finally {
       if (locked) {
-        CarbonLockUtil.fileUnlock(carbonTableStatusLock, LockUsage.INDEX_STATUS_LOCK);
+        carbonTableStatusLock.unlock();
       }
     }
   }
@@ -336,10 +337,12 @@ public class MVProvider {
    * @return flag to enable or disable mv
    * @throws IOException
    */
-  private static boolean isViewCanBeEnabled(MVSchema schema)
+  public boolean isViewCanBeEnabled(MVSchema schema, boolean ignoreDeferredCheck)
       throws IOException {
-    if (!schema.isRefreshIncremental()) {
-      return true;
+    if (!ignoreDeferredCheck) {
+      if (!schema.isRefreshIncremental()) {
+        return true;
+      }
     }
     boolean isViewCanBeEnabled = true;
     String viewMetadataPath =
@@ -364,17 +367,33 @@ public class MVProvider {
     }
     List<RelationIdentifier> relatedTables = schema.getRelatedTables();
     for (RelationIdentifier relatedTable : relatedTables) {
+      SegmentStatusManager.ValidAndInvalidSegmentsInfo validAndInvalidSegmentsInfo =
+          SegmentStatusManager.getValidAndInvalidSegmentsInfo(relatedTable);
       List<String> relatedTableSegmentList =
-          SegmentStatusManager.getValidSegmentList(relatedTable);
+          SegmentStatusManager.getValidSegmentList(validAndInvalidSegmentsInfo);
       if (!relatedTableSegmentList.isEmpty()) {
         if (viewSegmentMap.isEmpty()) {
           isViewCanBeEnabled = false;
         } else {
-          isViewCanBeEnabled = viewSegmentMap.get(
-              relatedTable.getDatabaseName() + CarbonCommonConstants.POINT +
-                  relatedTable.getTableName()).containsAll(relatedTableSegmentList);
+          String tableUniqueName =
+              relatedTable.getDatabaseName() + CarbonCommonConstants.POINT + relatedTable
+                  .getTableName();
+          isViewCanBeEnabled =
+              viewSegmentMap.get(tableUniqueName).containsAll(relatedTableSegmentList);
+          if (!isViewCanBeEnabled) {
+            // in case if main table is compacted and mv table mapping is not updated,
+            // check from merged Load Mapping
+            isViewCanBeEnabled = viewSegmentMap.get(tableUniqueName).containsAll(
+                relatedTableSegmentList.stream()
+                    .map(validAndInvalidSegmentsInfo.getMergedLoadMapping()::get)
+                    .flatMap(Collection::stream).collect(Collectors.toList()));
+          }
         }
       }
+    }
+    if (!isViewCanBeEnabled) {
+      LOG.error("MV `" + schema.getIdentifier().getTableName()
+          + "` is not in Sync with its related tables. Refresh MV to sync it.");
     }
     return isViewCanBeEnabled;
   }
@@ -429,8 +448,9 @@ public class MVProvider {
         }
         this.schemas.add(viewSchema);
         CarbonUtil.closeStreams(dataOutputStream, brWriter);
-        checkAndReloadSchemas(viewManager, true);
-        touchMDTFile();
+        if (!checkAndReloadSchemas(viewManager, true)) {
+          touchMDTFile();
+        }
       }
     }
 
@@ -523,7 +543,7 @@ public class MVProvider {
       LOG.info(String.format("Materialized view %s schema is deleted", viewName));
     }
 
-    private void checkAndReloadSchemas(MVManager viewManager, boolean touchFile)
+    private synchronized boolean checkAndReloadSchemas(MVManager viewManager, boolean touchFile)
         throws IOException {
       if (FileFactory.isFileExist(this.schemaIndexFilePath)) {
         long lastModifiedTime =
@@ -531,28 +551,48 @@ public class MVProvider {
         if (this.lastModifiedTime != lastModifiedTime) {
           this.schemas = this.retrieveAllSchemasInternal(viewManager);
           touchMDTFile();
+          return true;
         }
       } else {
         this.schemas = this.retrieveAllSchemasInternal(viewManager);
         if (touchFile) {
           touchMDTFile();
+          return true;
         }
       }
+      return false;
     }
 
-    private void touchMDTFile() throws IOException {
+    private synchronized void touchMDTFile() throws IOException {
       if (!FileFactory.isFileExist(this.systemDirectory)) {
         FileFactory.createDirectoryAndSetPermission(this.systemDirectory,
             new FsPermission(FsAction.ALL, FsAction.ALL, FsAction.ALL));
       }
-      CarbonFile schemaIndexFile = FileFactory.getCarbonFile(this.schemaIndexFilePath);
-      if (schemaIndexFile.exists()) {
-        schemaIndexFile.delete();
+      // two or more JVM process can access this method to update last modified time at same
+      // time causing exception. So take a system level lock on system folder and update
+      // last modified time of schema index file
+      ICarbonLock systemDirLock = CarbonLockFactory
+          .getSystemLevelCarbonLockObj(this.systemDirectory,
+              LockUsage.MATERIALIZED_VIEW_STATUS_LOCK);
+      boolean locked = false;
+      try {
+        locked = systemDirLock.lockWithRetries();
+        if (locked) {
+          CarbonFile schemaIndexFile = FileFactory.getCarbonFile(this.schemaIndexFilePath);
+          if (schemaIndexFile.exists()) {
+            schemaIndexFile.delete();
+          }
+          schemaIndexFile.createNewFile(new FsPermission(FsAction.ALL, FsAction.ALL, FsAction.ALL));
+          this.lastModifiedTime = schemaIndexFile.getLastModifiedTime();
+        } else {
+          LOG.warn("Unable to get Lock to refresh schema index last modified time");
+        }
+      } finally {
+        if (locked) {
+          systemDirLock.unlock();
+        }
       }
-      schemaIndexFile.createNewFile(new FsPermission(FsAction.ALL, FsAction.ALL, FsAction.ALL));
-      this.lastModifiedTime = schemaIndexFile.getLastModifiedTime();
     }
-
   }
 
 }

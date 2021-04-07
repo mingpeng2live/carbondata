@@ -46,12 +46,10 @@ class FlatFolderTableLoadingTestCase extends QueryTest with BeforeAndAfterAll {
 
   }
 
-  def validateDataFiles(tableUniqueName: String): Unit = {
+  def validateDataFiles(tableUniqueName: String, segmentId: String): Unit = {
     val carbonTable = CarbonMetadata.getInstance().getCarbonTable(tableUniqueName)
     val files = FileFactory.getCarbonFile(carbonTable.getTablePath).listFiles()
-    val factPath = FileFactory.getCarbonFile(CarbonTablePath.getFactDir(carbonTable.getTablePath))
     assert(files.exists(_.getName.endsWith(CarbonTablePath.CARBON_DATA_EXT)))
-    assert(!factPath.exists())
   }
 
   test("data loading for flat folder with global sort") {
@@ -65,7 +63,7 @@ class FlatFolderTableLoadingTestCase extends QueryTest with BeforeAndAfterAll {
       """.stripMargin)
     sql(s"""LOAD DATA local inpath '$resourcesPath/data.csv' INTO TABLE flatfolder_gs OPTIONS('DELIMITER'= ',', 'QUOTECHAR'= '"')""")
 
-    validateDataFiles("default_flatfolder_gs")
+    validateDataFiles("default_flatfolder_gs", "0")
 
     checkAnswer(sql("select empno, empname, designation, doj, workgroupcategory, workgroupcategoryname, deptno, deptname, projectcode, projectjoindate, projectenddate, attendance, utilization, salary from flatfolder_gs order by empno"),
       sql("select  empno, empname, designation, doj, workgroupcategory, workgroupcategoryname, deptno, deptname, projectcode, projectjoindate, projectenddate, attendance, utilization, salary from originTable order by empno"))
@@ -83,7 +81,7 @@ class FlatFolderTableLoadingTestCase extends QueryTest with BeforeAndAfterAll {
       """.stripMargin)
     sql(s"""LOAD DATA local inpath '$resourcesPath/data.csv' INTO TABLE flatfolder OPTIONS('DELIMITER'= ',', 'QUOTECHAR'= '"')""")
 
-    validateDataFiles("default_flatfolder")
+    validateDataFiles("default_flatfolder", "0")
 
     checkAnswer(sql("select empno, empname, designation, doj, workgroupcategory, workgroupcategoryname, deptno, deptname, projectcode, projectjoindate, projectenddate, attendance, utilization, salary from flatfolder order by empno"),
       sql("select  empno, empname, designation, doj, workgroupcategory, workgroupcategoryname, deptno, deptname, projectcode, projectjoindate, projectenddate, attendance, utilization, salary from originTable order by empno"))
@@ -103,7 +101,9 @@ class FlatFolderTableLoadingTestCase extends QueryTest with BeforeAndAfterAll {
     assert(FileFactory.getCarbonFile(carbonTable.getTablePath)
              .listFiles()
              .count(_.getName.endsWith(CarbonTablePath.MERGE_INDEX_FILE_EXT)) == 5)
-    sql("clean files for table t1 options('force'='true')")
+    var dryRunRes = sql("clean files for table t1 options('force'='true', 'dryrun'='true')").collect()
+    var cleanFilesRes = sql("clean files for table t1 options('force'='true')").collect()
+    assert(cleanFilesRes(0).get(0) == dryRunRes(0).get(0))
     assert(FileFactory.getCarbonFile(carbonTable.getTablePath)
              .listFiles()
              .count(_.getName.endsWith(CarbonTablePath.MERGE_INDEX_FILE_EXT)) == 4)
@@ -112,7 +112,9 @@ class FlatFolderTableLoadingTestCase extends QueryTest with BeforeAndAfterAll {
     assert(FileFactory.getCarbonFile(carbonTable.getTablePath)
              .listFiles()
              .count(_.getName.endsWith(CarbonTablePath.MERGE_INDEX_FILE_EXT)) == 5)
-    sql("clean files for table t1 options('force'='true')")
+    dryRunRes = sql("clean files for table t1 options('force'='true', 'dryrun'='true')").collect()
+    cleanFilesRes = sql("clean files for table t1 options('force'='true')").collect()
+    assert(cleanFilesRes(0).get(0) == dryRunRes(0).get(0))
     assert(FileFactory.getCarbonFile(carbonTable.getTablePath)
              .listFiles()
              .count(_.getName.endsWith(CarbonTablePath.MERGE_INDEX_FILE_EXT)) == 1)

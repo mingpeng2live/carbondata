@@ -17,7 +17,7 @@
 
 package org.apache.carbondata.spark.rdd
 
-import java.io.IOException
+import java.io.{File, IOException}
 import java.util
 import java.util.{Collections, List}
 import java.util.concurrent.atomic.AtomicInteger
@@ -25,6 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.reflect.classTag
+import scala.util.control.Breaks.{break, breakable}
 
 import org.apache.hadoop.mapreduce.{InputSplit, Job}
 import org.apache.spark._
@@ -96,6 +97,21 @@ class CarbonMergerRDD[K, V](
 
   def makeBroadCast(splits: util.List[CarbonInputSplit]): Unit = {
     broadCastSplits = sparkContext.broadcast(new CarbonInputSplitWrapper(splits))
+  }
+
+  // checks for added partition specs with external path.
+  // after compaction, location path to be updated with table path.
+  def checkAndUpdatePartitionLocation(partitionSpec: PartitionSpec) : PartitionSpec = {
+    if (partitionSpec != null) {
+      if (!partitionSpec.getLocation.toString.startsWith(carbonLoadModel.getTablePath)) {
+        val updatedPartitionLocation = CarbonDataProcessorUtil
+          .createCarbonStoreLocationForPartition(
+            carbonLoadModel.getCarbonDataLoadSchema.getCarbonTable,
+            partitionSpec.getPartitions.toArray.mkString(File.separator))
+        partitionSpec.setLocation(updatedPartitionLocation)
+      }
+    }
+    partitionSpec
   }
 
   override def internalCompute(theSplit: Partition, context: TaskContext): Iterator[(K, V)] = {
@@ -210,6 +226,7 @@ class CarbonMergerRDD[K, V](
         val tempStoreLoc = CarbonDataProcessorUtil.getLocalDataFolderLocation(
           carbonTable, carbonLoadModel.getTaskNo, mergeNumber, true, false)
 
+       checkAndUpdatePartitionLocation(partitionSpec)
         if (carbonTable.getSortScope == SortScopeOptions.SortScope.NO_SORT ||
           rawResultIteratorMap.get(CarbonCompactionUtil.UNSORTED_IDX).size() == 0) {
 

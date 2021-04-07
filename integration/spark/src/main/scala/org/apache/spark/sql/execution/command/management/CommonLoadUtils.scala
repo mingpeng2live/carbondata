@@ -1077,16 +1077,15 @@ object CommonLoadUtils {
           case _ =>
         }
       }
-
-      // Pre-priming for Partition table here
-      if (!StringUtils.isEmpty(loadParams.carbonLoadModel.getSegmentId)) {
-        DistributedRDDUtils.triggerPrepriming(loadParams.sparkSession,
-          table,
-          Seq(),
-          loadParams.operationContext,
-          loadParams.hadoopConf,
-          List(loadParams.carbonLoadModel.getSegmentId))
-      }
+    }
+    // Pre-priming for Partition table here
+    if (!StringUtils.isEmpty(loadParams.carbonLoadModel.getSegmentId)) {
+      DistributedRDDUtils.triggerPrepriming(loadParams.sparkSession,
+        table,
+        Seq(),
+        loadParams.operationContext,
+        loadParams.hadoopConf,
+        List(loadParams.carbonLoadModel.getSegmentId))
     }
     try {
       val compactedSegments = new util.ArrayList[String]()
@@ -1110,12 +1109,12 @@ object CommonLoadUtils {
       SegmentFileStore.getPartitionSpecs(loadParams.carbonLoadModel.getSegmentId,
         loadParams.carbonLoadModel.getTablePath,
         loadParams.carbonLoadModel.getLoadMetadataDetails.asScala.toArray)
-    if (specs != null) {
+    if (specs != null && !specs.isEmpty) {
       specs.asScala.map { spec =>
         Row(spec.getPartitions.asScala.mkString("/"), spec.getLocation.toString, spec.getUuid)
       }
     } else {
-      Seq.empty[Row]
+      Seq(Row(loadParams.carbonLoadModel.getSegmentId))
     }
   }
 

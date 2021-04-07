@@ -20,7 +20,6 @@ package org.apache.carbondata.core.indexstore;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.DataOutputStream;
-import java.io.File;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +44,8 @@ public class ExtendedBlocklet extends Blocklet {
   private Long count;
 
   private String segmentNo;
+
+  private boolean isCgIndexPresent = false;
 
   public ExtendedBlocklet() {
 
@@ -166,7 +167,8 @@ public class ExtendedBlocklet extends Blocklet {
    * @param uniqueLocation
    * @throws IOException
    */
-  public void serializeData(DataOutput out, Map<String, Short> uniqueLocation, boolean isCountJob)
+  public void serializeData(DataOutput out, Map<String, Short> uniqueLocation, boolean isCountJob,
+      boolean isExternalPath)
       throws IOException {
     super.write(out);
     if (isCountJob) {
@@ -189,12 +191,14 @@ public class ExtendedBlocklet extends Blocklet {
         DataOutputStream dos = new DataOutputStream(ebos);
         inputSplit.setFilePath(null);
         inputSplit.setBucketId(null);
-        if (inputSplit.isBlockCache()) {
+        // serialize detail info when it is blocklet cache or cgIndex is present.
+        if (inputSplit.isBlockCache() && !isCgIndexPresent) {
           inputSplit.updateFooterOffset();
           inputSplit.updateBlockLength();
           inputSplit.setWriteDetailInfo(false);
         }
         inputSplit.serializeFields(dos, uniqueLocation);
+        out.writeBoolean(isExternalPath);
         out.writeInt(ebos.size());
         out.write(ebos.getBuffer(), 0, ebos.size());
       }
@@ -220,18 +224,23 @@ public class ExtendedBlocklet extends Blocklet {
     if (in.readBoolean()) {
       indexUniqueId = in.readUTF();
     }
-    String filePath = getPath();
-    if (filePath.startsWith(File.separator)) {
-      setFilePath(tablePath + filePath);
-    } else {
-      setFilePath(filePath);
-    }
     boolean isSplitPresent = in.readBoolean();
     if (isSplitPresent) {
+      String filePath = getPath();
+      boolean isExternalPath = in.readBoolean();
+      if (!isExternalPath) {
+        setFilePath(tablePath + filePath);
+      } else {
+        setFilePath(filePath);
+      }
       // getting the length of the data
       final int serializeLen = in.readInt();
       this.inputSplit =
           new CarbonInputSplit(serializeLen, in, getFilePath(), locations, getBlockletId());
     }
+  }
+
+  public void setCgIndexPresent(boolean cgIndexPresent) {
+    isCgIndexPresent = cgIndexPresent;
   }
 }

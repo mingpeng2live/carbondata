@@ -27,11 +27,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.nio.charset.Charset;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.carbondata.common.logging.LogServiceFactory;
@@ -142,6 +138,7 @@ public class SegmentStatusManager {
     List<Segment> listOfInvalidSegments = new ArrayList<>(10);
     List<Segment> listOfStreamSegments = new ArrayList<>(10);
     List<Segment> listOfInProgressSegments = new ArrayList<>(10);
+    Map<String, List<String>> mergedLoadMapping = new HashMap<>();
 
     try {
       if (loadMetadataDetails == null) {
@@ -204,6 +201,20 @@ public class SegmentStatusManager {
             || SegmentStatus.COMPACTED == segment.getSegmentStatus()
             || SegmentStatus.MARKED_FOR_DELETE == segment.getSegmentStatus())) {
           listOfInvalidSegments.add(new Segment(segment.getLoadName(), segment.getSegmentFile()));
+          if (SegmentStatus.COMPACTED == segment.getSegmentStatus()) {
+            // After main table compaction, segment mapping of child tables may not be updated.
+            // In order to check if main table and child table are in sync after compaction,
+            // check the main table's merged segment's map. ex: {0.1 -> 0,1,2,3}
+            if (null != segment.getMergedLoadName()) {
+              if (mergedLoadMapping.containsKey(segment.getMergedLoadName())) {
+                mergedLoadMapping.get(segment.getMergedLoadName()).add(segment.getLoadName());
+              } else {
+                List<String> mergedLoads = new ArrayList<>();
+                mergedLoads.add(segment.getLoadName());
+                mergedLoadMapping.put(segment.getMergedLoadName(), mergedLoads);
+              }
+            }
+          }
         } else if (SegmentStatus.INSERT_IN_PROGRESS == segment.getSegmentStatus() ||
             SegmentStatus.INSERT_OVERWRITE_IN_PROGRESS == segment.getSegmentStatus()) {
           listOfInProgressSegments.add(
@@ -215,7 +226,7 @@ public class SegmentStatusManager {
       throw e;
     }
     return new ValidAndInvalidSegmentsInfo(listOfValidSegments, listOfValidUpdatedSegments,
-        listOfInvalidSegments, listOfStreamSegments, listOfInProgressSegments);
+        listOfInvalidSegments, listOfStreamSegments, listOfInProgressSegments, mergedLoadMapping);
   }
 
   /**
@@ -235,21 +246,28 @@ public class SegmentStatusManager {
   }
 
   /**
-   * Returns valid segment list for a given RelationIdentifier
-   *
-   * @param relationIdentifier get list of segments for relation identifier
-   * @return list of valid segment id's
+   * Returns valid segment list from validAndInvalidSegmentsInfo
    */
-  public static List<String> getValidSegmentList(RelationIdentifier relationIdentifier)
-      throws IOException {
+  public static List<String> getValidSegmentList(
+      ValidAndInvalidSegmentsInfo validAndInvalidSegmentsInfo) {
     List<String> segmentList = new ArrayList<>();
-    List<Segment> validSegments = new SegmentStatusManager(AbsoluteTableIdentifier
-        .from(relationIdentifier.getTablePath(), relationIdentifier.getDatabaseName(),
-            relationIdentifier.getTableName())).getValidAndInvalidSegments().getValidSegments();
-    for (Segment segment : validSegments) {
+    for (Segment segment : validAndInvalidSegmentsInfo.getValidSegments()) {
       segmentList.add(segment.getSegmentNo());
     }
     return segmentList;
+  }
+
+  /**
+   * Returns ValidAndInvalidSegmentsInfo for a given RelationIdentifier
+   *
+   * @param relationIdentifier get list of segments for relation identifier
+   * @return validAndInvalidSegmentsInfo
+   */
+  public static ValidAndInvalidSegmentsInfo getValidAndInvalidSegmentsInfo(
+      RelationIdentifier relationIdentifier) throws IOException {
+    return new SegmentStatusManager(AbsoluteTableIdentifier
+        .from(relationIdentifier.getTablePath(), relationIdentifier.getDatabaseName(),
+            relationIdentifier.getTableName())).getValidAndInvalidSegments();
   }
 
   /**
@@ -427,6 +445,8 @@ public class SegmentStatusManager {
   public static List<String> updateDeletionStatus(AbsoluteTableIdentifier identifier,
       List<String> loadIds, String tableFolderPath) throws Exception {
     CarbonTableIdentifier carbonTableIdentifier = identifier.getCarbonTableIdentifier();
+    ICarbonLock carbonCleanFilesLock =
+        CarbonLockFactory.getCarbonLockObj(identifier, LockUsage.CLEAN_FILES_LOCK);
     ICarbonLock carbonDeleteSegmentLock =
         CarbonLockFactory.getCarbonLockObj(identifier, LockUsage.DELETE_SEGMENT_LOCK);
     ICarbonLock carbonTableStatusLock =
@@ -437,46 +457,52 @@ public class SegmentStatusManager {
     try {
       if (carbonDeleteSegmentLock.lockWithRetries()) {
         LOG.info("Delete segment lock has been successfully acquired");
+        if (carbonCleanFilesLock.lockWithRetries()) {
+          LOG.info("Clean Files lock has been successfully acquired");
+          String dataLoadLocation = CarbonTablePath.getTableStatusFilePath(identifier
+              .getTablePath());
+          LoadMetadataDetails[] listOfLoadFolderDetailsArray = null;
+          if (!FileFactory.isFileExist(dataLoadLocation)) {
+            // log error.
+            LOG.error("Load metadata file is not present.");
+            return loadIds;
+          }
+          // read existing metadata details in load metadata.
+          listOfLoadFolderDetailsArray = readLoadMetadata(tableFolderPath);
+          if (listOfLoadFolderDetailsArray.length != 0) {
+            updateDeletionStatus(identifier, loadIds, listOfLoadFolderDetailsArray, invalidLoadIds);
+            if (invalidLoadIds.isEmpty()) {
+              // All or None , if anything fails then don't write
+              if (carbonTableStatusLock.lockWithRetries()) {
+                LOG.info("Table status lock has been successfully acquired");
+                // To handle concurrency scenarios, always take latest metadata before writing
+                // into status file.
+                LoadMetadataDetails[] latestLoadMetadataDetails = readLoadMetadata(tableFolderPath);
+                writeLoadDetailsIntoFile(dataLoadLocation, updateLatestTableStatusDetails(
+                    listOfLoadFolderDetailsArray, latestLoadMetadataDetails).stream()
+                    .toArray(LoadMetadataDetails[]::new));
+              } else {
+                String errorMsg = "Delete segment by id is failed for " + tableDetails
+                    + ". Not able to acquire the table status lock due to other operation running "
+                    + "in the background.";
+                LOG.error(errorMsg);
+                throw new Exception(errorMsg + " Please try after some time.");
+              }
 
-        String dataLoadLocation = CarbonTablePath.getTableStatusFilePath(identifier.getTablePath());
-        LoadMetadataDetails[] listOfLoadFolderDetailsArray = null;
-        if (!FileFactory.isFileExist(dataLoadLocation)) {
-          // log error.
-          LOG.error("Load metadata file is not present.");
-          return loadIds;
-        }
-        // read existing metadata details in load metadata.
-        listOfLoadFolderDetailsArray = readLoadMetadata(tableFolderPath);
-        if (listOfLoadFolderDetailsArray.length != 0) {
-          updateDeletionStatus(identifier, loadIds, listOfLoadFolderDetailsArray, invalidLoadIds);
-          if (invalidLoadIds.isEmpty()) {
-            // All or None , if anything fails then don't write
-            if (carbonTableStatusLock.lockWithRetries()) {
-              LOG.info("Table status lock has been successfully acquired");
-              // To handle concurrency scenarios, always take latest metadata before writing
-              // into status file.
-              LoadMetadataDetails[] latestLoadMetadataDetails = readLoadMetadata(tableFolderPath);
-              updateLatestTableStatusDetails(listOfLoadFolderDetailsArray,
-                  latestLoadMetadataDetails);
-              writeLoadDetailsIntoFile(dataLoadLocation, listOfLoadFolderDetailsArray);
-            }
-            else {
-              String errorMsg = "Delete segment by id is failed for " + tableDetails
-                  + ". Not able to acquire the table status lock due to other operation running "
-                  + "in the background.";
-              LOG.error(errorMsg);
-              throw new Exception(errorMsg + " Please try after some time.");
+            } else {
+              return invalidLoadIds;
             }
 
           } else {
-            return invalidLoadIds;
+            LOG.error("Delete segment by Id is failed. No matching segment id found.");
+            return loadIds;
           }
-
         } else {
-          LOG.error("Delete segment by Id is failed. No matching segment id found.");
-          return loadIds;
+          String errorMsg = "Delete segment by id is failed for " + tableDetails
+              + " as not able to acquire clean files lock.";
+          LOG.error(errorMsg);
+          throw new Exception(errorMsg + " Please try after some time.");
         }
-
       } else {
         String errorMsg = "Delete segment by id is failed for " + tableDetails
             + ". Not able to acquire the delete segment lock due to another delete "
@@ -490,6 +516,7 @@ public class SegmentStatusManager {
     } finally {
       CarbonLockUtil.fileUnlock(carbonTableStatusLock, LockUsage.TABLE_STATUS_LOCK);
       CarbonLockUtil.fileUnlock(carbonDeleteSegmentLock, LockUsage.DELETE_SEGMENT_LOCK);
+      CarbonLockUtil.fileUnlock(carbonCleanFilesLock, LockUsage.CLEAN_FILES_LOCK);
     }
 
     return invalidLoadIds;
@@ -505,6 +532,8 @@ public class SegmentStatusManager {
   public static List<String> updateDeletionStatus(AbsoluteTableIdentifier identifier,
       String loadDate, String tableFolderPath, Long loadStartTime) throws Exception {
     CarbonTableIdentifier carbonTableIdentifier = identifier.getCarbonTableIdentifier();
+    ICarbonLock carbonCleanFilesLock =
+        CarbonLockFactory.getCarbonLockObj(identifier, LockUsage.CLEAN_FILES_LOCK);
     ICarbonLock carbonDeleteSegmentLock =
         CarbonLockFactory.getCarbonLockObj(identifier, LockUsage.DELETE_SEGMENT_LOCK);
     ICarbonLock carbonTableStatusLock =
@@ -515,49 +544,55 @@ public class SegmentStatusManager {
     try {
       if (carbonDeleteSegmentLock.lockWithRetries()) {
         LOG.info("Delete segment lock has been successfully acquired");
+        if (carbonCleanFilesLock.lockWithRetries()) {
+          LOG.info("Clean Files lock has been successfully acquired");
+          String dataLoadLocation = CarbonTablePath.getTableStatusFilePath(identifier
+              .getTablePath());
+          LoadMetadataDetails[] listOfLoadFolderDetailsArray = null;
 
-        String dataLoadLocation = CarbonTablePath.getTableStatusFilePath(identifier.getTablePath());
-        LoadMetadataDetails[] listOfLoadFolderDetailsArray = null;
-
-        if (!FileFactory.isFileExist(dataLoadLocation)) {
-          // Table status file is not present, maybe table is empty, ignore this operation
-          LOG.warn("Trying to update table metadata file which is not present.");
-          return invalidLoadTimestamps;
-        }
-        // read existing metadata details in load metadata.
-        listOfLoadFolderDetailsArray = readLoadMetadata(tableFolderPath);
-        if (listOfLoadFolderDetailsArray.length != 0) {
-          updateDeletionStatus(identifier, loadDate, listOfLoadFolderDetailsArray,
-              invalidLoadTimestamps, loadStartTime);
-          if (invalidLoadTimestamps.isEmpty()) {
-            if (carbonTableStatusLock.lockWithRetries()) {
-              LOG.info("Table status lock has been successfully acquired.");
-              // To handle concurrency scenarios, always take latest metadata before writing
-              // into status file.
-              LoadMetadataDetails[] latestLoadMetadataDetails = readLoadMetadata(tableFolderPath);
-              updateLatestTableStatusDetails(listOfLoadFolderDetailsArray,
-                  latestLoadMetadataDetails);
-              writeLoadDetailsIntoFile(dataLoadLocation, listOfLoadFolderDetailsArray);
-            }
-            else {
-
-              String errorMsg = "Delete segment by date is failed for " + tableDetails
-                  + ". Not able to acquire the table status lock due to other operation running "
-                  + "in the background.";
-              LOG.error(errorMsg);
-              throw new Exception(errorMsg + " Please try after some time.");
-
-            }
-          } else {
+          if (!FileFactory.isFileExist(dataLoadLocation)) {
+            // Table status file is not present, maybe table is empty, ignore this operation
+            LOG.warn("Trying to update table metadata file which is not present.");
             return invalidLoadTimestamps;
           }
+          // read existing metadata details in load metadata.
+          listOfLoadFolderDetailsArray = readLoadMetadata(tableFolderPath);
+          if (listOfLoadFolderDetailsArray.length != 0) {
+            updateDeletionStatus(identifier, loadDate, listOfLoadFolderDetailsArray,
+                invalidLoadTimestamps, loadStartTime);
+            if (invalidLoadTimestamps.isEmpty()) {
+              if (carbonTableStatusLock.lockWithRetries()) {
+                LOG.info("Table status lock has been successfully acquired.");
+                // To handle concurrency scenarios, always take latest metadata before writing
+                // into status file.
+                LoadMetadataDetails[] latestLoadMetadataDetails = readLoadMetadata(tableFolderPath);
+                writeLoadDetailsIntoFile(dataLoadLocation, updateLatestTableStatusDetails(
+                    listOfLoadFolderDetailsArray, latestLoadMetadataDetails).stream()
+                    .toArray(LoadMetadataDetails[]::new));
+              } else {
 
+                String errorMsg = "Delete segment by date is failed for " + tableDetails
+                    + ". Not able to acquire the table status lock due to other operation running "
+                    + "in the background.";
+                LOG.error(errorMsg);
+                throw new Exception(errorMsg + " Please try after some time.");
+
+              }
+            } else {
+              return invalidLoadTimestamps;
+            }
+
+          } else {
+            LOG.error("Delete segment by date is failed. No matching segment found.");
+            invalidLoadTimestamps.add(loadDate);
+            return invalidLoadTimestamps;
+          }
         } else {
-          LOG.error("Delete segment by date is failed. No matching segment found.");
-          invalidLoadTimestamps.add(loadDate);
-          return invalidLoadTimestamps;
+          String errorMsg = "Delete segment by id is failed for " + tableDetails
+              + " as not able to acquire clean files lock.";
+          LOG.error(errorMsg);
+          throw new Exception(errorMsg + " Please try after some time.");
         }
-
       } else {
         String errorMsg = "Delete segment by date is failed for " + tableDetails
             + ". Not able to acquire the delete segment lock due to another delete "
@@ -571,6 +606,7 @@ public class SegmentStatusManager {
     } finally {
       CarbonLockUtil.fileUnlock(carbonTableStatusLock, LockUsage.TABLE_STATUS_LOCK);
       CarbonLockUtil.fileUnlock(carbonDeleteSegmentLock, LockUsage.DELETE_SEGMENT_LOCK);
+      CarbonLockUtil.fileUnlock(carbonCleanFilesLock, LockUsage.CLEAN_FILES_LOCK);
     }
 
     return invalidLoadTimestamps;
@@ -819,41 +855,24 @@ public class SegmentStatusManager {
     }
   }
 
-  /**
-   * This API will return the update status file name.
-   * @param segmentList
-   * @return
-   */
-  public String getUpdateStatusFileName(LoadMetadataDetails[] segmentList) {
-    if (segmentList.length == 0) {
-      return "";
-    }
-    else {
-      for (LoadMetadataDetails eachSeg : segmentList) {
-        // file name stored in 0th segment.
-        if (eachSeg.getLoadName().equalsIgnoreCase("0")) {
-          return eachSeg.getUpdateStatusFileName();
-        }
-      }
-    }
-    return "";
-  }
-
   public static class ValidAndInvalidSegmentsInfo {
     private final List<Segment> listOfValidSegments;
     private final List<Segment> listOfValidUpdatedSegments;
     private final List<Segment> listOfInvalidSegments;
     private final List<Segment> listOfStreamSegments;
     private final List<Segment> listOfInProgressSegments;
+    Map<String, List<String>> mergedLoadMapping;
 
     private ValidAndInvalidSegmentsInfo(List<Segment> listOfValidSegments,
         List<Segment> listOfValidUpdatedSegments, List<Segment> listOfInvalidUpdatedSegments,
-        List<Segment> listOfStreamSegments, List<Segment> listOfInProgressSegments) {
+        List<Segment> listOfStreamSegments, List<Segment> listOfInProgressSegments,
+        Map<String, List<String>> mergedLoadMapping) {
       this.listOfValidSegments = listOfValidSegments;
       this.listOfValidUpdatedSegments = listOfValidUpdatedSegments;
       this.listOfInvalidSegments = listOfInvalidUpdatedSegments;
       this.listOfStreamSegments = listOfStreamSegments;
       this.listOfInProgressSegments = listOfInProgressSegments;
+      this.mergedLoadMapping = mergedLoadMapping;
     }
 
     public List<Segment> getInvalidSegments() {
@@ -870,6 +889,10 @@ public class SegmentStatusManager {
 
     public List<Segment> getListOfInProgressSegments() {
       return listOfInProgressSegments;
+    }
+
+    public Map<String, List<String>> getMergedLoadMapping() {
+      return mergedLoadMapping;
     }
   }
 
@@ -956,7 +979,27 @@ public class SegmentStatusManager {
     }
   }
 
-  private static boolean isLoadDeletionRequired(LoadMetadataDetails[] details) {
+  public static boolean isExpiredSegment(LoadMetadataDetails oneLoad, AbsoluteTableIdentifier
+      absoluteTableIdentifier) {
+    boolean isExpiredSegment = false;
+    if (oneLoad.getSegmentStatus() == SegmentStatus.COMPACTED || oneLoad.getSegmentStatus() ==
+        SegmentStatus.MARKED_FOR_DELETE) {
+      isExpiredSegment = true;
+    } else if (oneLoad.getSegmentStatus() == SegmentStatus.INSERT_IN_PROGRESS || oneLoad
+        .getSegmentStatus() == SegmentStatus.INSERT_OVERWRITE_IN_PROGRESS) {
+      // check if lock can be acquired
+      ICarbonLock segmentLock = CarbonLockFactory.getCarbonLockObj(absoluteTableIdentifier,
+          CarbonTablePath.addSegmentPrefix(oneLoad.getLoadName()) + LockUsage.LOCK);
+      try {
+        isExpiredSegment = segmentLock.lockWithRetries();
+      } finally {
+        CarbonLockUtil.fileUnlock(segmentLock, LockUsage.LOCK);
+      }
+    }
+    return isExpiredSegment;
+  }
+
+  public static boolean isLoadDeletionRequired(LoadMetadataDetails[] details) {
     if (details != null && details.length > 0) {
       for (LoadMetadataDetails oneRow : details) {
         if ((SegmentStatus.MARKED_FOR_DELETE == oneRow.getSegmentStatus()
@@ -992,10 +1035,10 @@ public class SegmentStatusManager {
 
   private static class ReturnTuple {
     LoadMetadataDetails[] details;
-    boolean isUpdateRequired;
-    ReturnTuple(LoadMetadataDetails[] details, boolean isUpdateRequired) {
+    Set<String> loadsToDelete;
+    ReturnTuple(LoadMetadataDetails[] details, Set<String> loadsToDelete) {
       this.details = details;
-      this.isUpdateRequired = isUpdateRequired;
+      this.loadsToDelete = loadsToDelete;
     }
   }
 
@@ -1003,10 +1046,10 @@ public class SegmentStatusManager {
       AbsoluteTableIdentifier absoluteTableIdentifier, LoadMetadataDetails[] details,
       boolean cleanStaleInProgress) {
     // Delete marked loads
-    boolean isUpdateRequired = DeleteLoadFolders
+    Set<String> loadsToDelete = DeleteLoadFolders
         .deleteLoadFoldersFromFileSystem(absoluteTableIdentifier, isForceDeletion, details,
             carbonTable.getMetadataPath(), cleanStaleInProgress);
-    return new ReturnTuple(details, isUpdateRequired);
+    return new ReturnTuple(details, loadsToDelete);
   }
 
   public static void deleteLoadsAndUpdateMetadata(CarbonTable carbonTable, boolean isForceDeletion,
@@ -1019,11 +1062,12 @@ public class SegmentStatusManager {
     if (isLoadDeletionRequired(metadataDetails)) {
       AbsoluteTableIdentifier identifier = carbonTable.getAbsoluteTableIdentifier();
       boolean updateCompletionStatus = false;
+      Set<String> loadsToDelete = new HashSet<>();
       LoadMetadataDetails[] newAddedLoadHistoryList = null;
       ReturnTuple tuple =
           isUpdateRequired(isForceDeletion, carbonTable, identifier, metadataDetails,
               cleanStaleInprogress);
-      if (tuple.isUpdateRequired) {
+      if (!tuple.loadsToDelete.isEmpty()) {
         ICarbonLock carbonTableStatusLock =
             CarbonLockFactory.getCarbonLockObj(identifier, LockUsage.TABLE_STATUS_LOCK);
         boolean locked = false;
@@ -1044,7 +1088,7 @@ public class SegmentStatusManager {
             ReturnTuple tuple2 =
                 isUpdateRequired(isForceDeletion, carbonTable,
                     identifier, details, cleanStaleInprogress);
-            if (!tuple2.isUpdateRequired) {
+            if (tuple2.loadsToDelete.isEmpty()) {
               return;
             }
             // read latest table status again.
@@ -1083,6 +1127,7 @@ public class SegmentStatusManager {
                   latestStatus.toArray(new LoadMetadataDetails[0]));
             }
             updateCompletionStatus = true;
+            loadsToDelete = tuple2.loadsToDelete;
           } else {
             String dbName = identifier.getCarbonTableIdentifier().getDatabaseName();
             String tableName = identifier.getCarbonTableIdentifier().getTableName();
@@ -1100,7 +1145,7 @@ public class SegmentStatusManager {
           if (updateCompletionStatus) {
             DeleteLoadFolders
                 .physicalFactAndMeasureMetadataDeletion(carbonTable, newAddedLoadHistoryList,
-                  isForceDeletion, partitionSpecs, cleanStaleInprogress);
+                  isForceDeletion, partitionSpecs, cleanStaleInprogress, loadsToDelete);
           }
         }
       }

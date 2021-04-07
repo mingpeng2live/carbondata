@@ -19,16 +19,19 @@ package org.apache.carbondata.spark.rdd
 
 import java.util
 import java.util.{Collections, List}
-import java.util.concurrent.ExecutorService
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
+import scala.util.control.Breaks.{break, breakable}
 
 import org.apache.hadoop.mapreduce.InputSplit
 import org.apache.spark.sql.{CarbonThreadUtil, SparkSession, SQLContext}
-import org.apache.spark.sql.execution.command.{CarbonMergerMapping, CompactionCallableModel, CompactionModel}
+import org.apache.spark.sql.catalyst.TableIdentifier
+import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
+import org.apache.spark.sql.execution.command.{AlterTableAddPartitionCommand, AlterTableDropPartitionCommand, CarbonMergerMapping, CompactionCallableModel, CompactionModel}
 import org.apache.spark.sql.execution.command.management.CommonLoadUtils
+import org.apache.spark.sql.execution.datasources.PartitioningUtils
 import org.apache.spark.sql.util.SparkSQLUtil
 import org.apache.spark.util.{CollectionAccumulator, MergeIndexUtil}
 
@@ -36,6 +39,7 @@ import org.apache.carbondata.core.constants.CarbonCommonConstants
 import org.apache.carbondata.core.constants.SortScopeOptions.SortScope
 import org.apache.carbondata.core.datastore.impl.FileFactory
 import org.apache.carbondata.core.index.{IndexStoreManager, Segment}
+import org.apache.carbondata.core.indexstore.PartitionSpec
 import org.apache.carbondata.core.locks.{CarbonLockFactory, ICarbonLock, LockUsage}
 import org.apache.carbondata.core.metadata.SegmentFileStore
 import org.apache.carbondata.core.metadata.schema.table.CarbonTable
@@ -92,19 +96,25 @@ class CarbonTableCompactor(
       val lastSegment = sortedSegments.get(sortedSegments.size() - 1)
       val compactedLoad = CarbonDataMergerUtil.getMergedLoadName(loadsToMerge)
       var segmentLocks: ListBuffer[ICarbonLock] = ListBuffer.empty
+      val validSegments = new java.util.ArrayList[LoadMetadataDetails]
       loadsToMerge.asScala.foreach { segmentId =>
         val segmentLock = CarbonLockFactory
           .getCarbonLockObj(carbonLoadModel.getCarbonDataLoadSchema.getCarbonTable
             .getAbsoluteTableIdentifier,
             CarbonTablePath.addSegmentPrefix(segmentId.getLoadName) + LockUsage.LOCK)
-        if (!segmentLock.lockWithRetries()) {
-          throw new Exception(s"Failed to acquire lock on segment ${segmentId.getLoadName}," +
-            s" during compaction of table ${compactionModel.carbonTable.getQualifiedName}")
+        if (segmentLock.lockWithRetries()) {
+          validSegments.add(segmentId)
+          segmentLocks += segmentLock
+        } else {
+          LOGGER.warn(s"Failed to acquire lock on segment ${segmentId.getLoadName}, " +
+                      s"during compaction of table ${compactionModel.carbonTable.getQualifiedName}")
         }
-        segmentLocks += segmentLock
       }
       try {
-        scanSegmentsAndSubmitJob(loadsToMerge, compactedSegments, compactedLoad)
+        // need to be cleared for multiple compactions.
+        // only contains the segmentIds which have to be compacted.
+        compactedSegments.clear()
+        scanSegmentsAndSubmitJob(validSegments, compactedSegments, compactedLoad)
       } catch {
         case e: Exception =>
           LOGGER.error(s"Exception in compaction thread ${ e.getMessage }", e)
@@ -244,6 +254,7 @@ class CarbonTableCompactor(
       .sparkContext
       .collectionAccumulator[Map[String, SegmentMetaDataInfo]]
 
+    val updatePartitionSpecs : List[PartitionSpec] = new util.ArrayList[PartitionSpec]
     var mergeRDD: CarbonMergerRDD[String, Boolean] = null
     if (carbonTable.isHivePartitionTable) {
       // collect related partitions
@@ -260,6 +271,13 @@ class CarbonTableCompactor(
       if (partitionSpecs != null && partitionSpecs.nonEmpty) {
         compactionCallableModel.compactedPartitions = Some(partitionSpecs)
       }
+      partitionSpecs.foreach(partitionSpec => {
+        if (!partitionSpec.getLocation.toString.startsWith(carbonLoadModel.getTablePath)) {
+          // if partition spec added is external path,
+          // after compaction location path to be updated with table path.
+          updatePartitionSpecs.add(partitionSpec)
+        }
+      })
     }
 
     val mergeStatus =
@@ -273,7 +291,26 @@ class CarbonTableCompactor(
           segmentMetaDataAccumulator)
       } else {
         if (mergeRDD != null) {
-          mergeRDD.collect
+          val result = mergeRDD.collect
+          if (!updatePartitionSpecs.isEmpty) {
+            val tableIdentifier = new TableIdentifier(carbonTable.getTableName,
+              Some(carbonTable.getDatabaseName))
+            val partitionSpecs = updatePartitionSpecs.asScala.map {
+              partitionSpec =>
+                // replaces old partitionSpec with updated partitionSpec
+                mergeRDD.checkAndUpdatePartitionLocation(partitionSpec)
+                PartitioningUtils.parsePathFragment(
+                  String.join(CarbonCommonConstants.FILE_SEPARATOR, partitionSpec.getPartitions))
+            }
+            // To update partitionSpec in hive metastore, drop and add with latest path.
+            AlterTableDropPartitionCommand(
+              tableIdentifier,
+              partitionSpecs,
+              true, false, true).run(sqlContext.sparkSession)
+            AlterTableAddPartitionCommand(tableIdentifier,
+              partitionSpecs.map(p => (p, None)), false).run(sqlContext.sparkSession)
+          }
+          result
         } else {
           new CarbonMergerRDD(
             sc.sparkSession,
@@ -293,26 +330,46 @@ class CarbonTableCompactor(
 
     if (finalMergeStatus) {
       val mergedLoadNumber = CarbonDataMergerUtil.getLoadNumberFromLoadName(mergedLoadName)
-      var segmentFilesForIUDCompact = new util.ArrayList[Segment]()
       var segmentFileName: String = null
+
+      val isMergeIndex = CarbonProperties.getInstance().getProperty(
+        CarbonCommonConstants.CARBON_MERGE_INDEX_IN_SEGMENT,
+        CarbonCommonConstants.CARBON_MERGE_INDEX_IN_SEGMENT_DEFAULT).toBoolean
+
+      if (compactionType != CompactionType.IUD_DELETE_DELTA && isMergeIndex) {
+        MergeIndexUtil.mergeIndexFilesOnCompaction(compactionCallableModel)
+      }
+
       if (carbonTable.isHivePartitionTable) {
-        val readPath =
-          CarbonTablePath.getSegmentFilesLocation(carbonLoadModel.getTablePath) +
-          CarbonCommonConstants.FILE_SEPARATOR + carbonLoadModel.getFactTimeStamp + ".tmp"
-        // Merge all partition files into a single file.
-        segmentFileName =
-          mergedLoadNumber + "_" + carbonLoadModel.getFactTimeStamp
-        val segmentFile = SegmentFileStore
-          .mergeSegmentFiles(readPath,
-            segmentFileName,
-            CarbonTablePath.getSegmentFilesLocation(carbonLoadModel.getTablePath))
-        if (segmentFile != null) {
-          SegmentFileStore
-            .moveFromTempFolder(segmentFile,
-              carbonLoadModel.getFactTimeStamp + ".tmp",
-              carbonLoadModel.getTablePath)
+        if (isMergeIndex) {
+          val segmentTmpFileName = carbonLoadModel.getFactTimeStamp + CarbonTablePath.SEGMENT_EXT
+          segmentFileName = mergedLoadNumber + CarbonCommonConstants.UNDERSCORE + segmentTmpFileName
+          val segmentTmpFile = FileFactory.getCarbonFile(
+            CarbonTablePath.getSegmentFilePath(carbonTable.getTablePath, segmentTmpFileName))
+          if (!segmentTmpFile.renameForce(
+            CarbonTablePath.getSegmentFilePath(carbonTable.getTablePath, segmentFileName))) {
+            throw new Exception(s"Rename segment file from ${segmentTmpFileName} " +
+              s"to ${segmentFileName} failed.")
+          }
+        } else {
+          val readPath =
+            CarbonTablePath.getSegmentFilesLocation(carbonLoadModel.getTablePath) +
+              CarbonCommonConstants.FILE_SEPARATOR + carbonLoadModel.getFactTimeStamp + ".tmp"
+          // Merge all partition files into a single file.
+          segmentFileName =
+            mergedLoadNumber + CarbonCommonConstants.UNDERSCORE + carbonLoadModel.getFactTimeStamp
+          val mergedSegmetFile = SegmentFileStore
+            .mergeSegmentFiles(readPath,
+              segmentFileName,
+              CarbonTablePath.getSegmentFilesLocation(carbonLoadModel.getTablePath))
+          if (mergedSegmetFile != null) {
+            SegmentFileStore
+              .moveFromTempFolder(mergedSegmetFile,
+                carbonLoadModel.getFactTimeStamp + ".tmp",
+                carbonLoadModel.getTablePath)
+          }
+          segmentFileName = segmentFileName + CarbonTablePath.SEGMENT_EXT
         }
-        segmentFileName = segmentFileName + CarbonTablePath.SEGMENT_EXT
       } else {
         // Get the segment files each updated segment in case of IUD compaction
         val segmentMetaDataInfo = CommonLoadUtils.getSegmentMetaDataInfoFromAccumulator(
@@ -357,10 +414,6 @@ class CarbonTableCompactor(
         throw new Exception(s"Compaction failed to update metadata for table" +
                             s" ${ carbonLoadModel.getDatabaseName }." +
                             s"${ carbonLoadModel.getTableName }")
-      }
-
-      if (compactionType != CompactionType.IUD_DELETE_DELTA) {
-        MergeIndexUtil.mergeIndexFilesOnCompaction(compactionCallableModel)
       }
 
       val compactionLoadStatusPostEvent = AlterTableCompactionPostStatusUpdateEvent(sc.sparkSession,

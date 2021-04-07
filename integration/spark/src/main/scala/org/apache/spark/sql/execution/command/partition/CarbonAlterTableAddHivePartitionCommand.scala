@@ -25,6 +25,7 @@ import org.apache.spark.sql.{CarbonEnv, Row, SparkSession}
 import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
 import org.apache.spark.sql.execution.command.{AlterTableAddPartitionCommand, AlterTableDropPartitionCommand, AlterTableModel, AtomicRunnableCommand}
+import org.apache.spark.sql.execution.command.management.CommonLoadUtils
 import org.apache.spark.sql.optimizer.CarbonFilters
 
 import org.apache.carbondata.common.logging.LogServiceFactory
@@ -36,7 +37,7 @@ import org.apache.carbondata.core.metadata.schema.table.CarbonTable
 import org.apache.carbondata.core.statusmanager.{FileFormat, SegmentStatus}
 import org.apache.carbondata.core.util.CarbonUtil
 import org.apache.carbondata.core.util.path.CarbonTablePath
-import org.apache.carbondata.events.{AlterTableMergeIndexEvent, OperationContext, OperationListenerBus, PostAlterTableHivePartitionCommandEvent, PreAlterTableHivePartitionCommandEvent}
+import org.apache.carbondata.events.{withEvents, AlterTableMergeIndexEvent, OperationContext, OperationListenerBus, PostAlterTableHivePartitionCommandEvent, PreAlterTableHivePartitionCommandEvent}
 import org.apache.carbondata.processing.loading.model.{CarbonDataLoadSchema, CarbonLoadModel}
 import org.apache.carbondata.processing.util.CarbonLoaderUtil
 
@@ -75,18 +76,11 @@ case class CarbonAlterTableAddHivePartitionCommand(
           currParts.exists(p => part.equals(p))
         }.asJava)
       }
-      val operationContext = new OperationContext
-      val preAlterTableHivePartitionCommandEvent = PreAlterTableHivePartitionCommandEvent(
-        sparkSession,
-        table)
-      OperationListenerBus.getInstance()
-        .fireEvent(preAlterTableHivePartitionCommandEvent, operationContext)
-      AlterTableAddPartitionCommand(tableName, partitionSpecsAndLocs, ifNotExists).run(sparkSession)
-      val postAlterTableHivePartitionCommandEvent = PostAlterTableHivePartitionCommandEvent(
-        sparkSession,
-        table)
-      OperationListenerBus.getInstance()
-        .fireEvent(postAlterTableHivePartitionCommandEvent, operationContext)
+      withEvents(PreAlterTableHivePartitionCommandEvent(sparkSession, table),
+        PostAlterTableHivePartitionCommandEvent(sparkSession, table)) {
+        AlterTableAddPartitionCommand(tableName, partitionSpecsAndLocs, ifNotExists).run(
+          sparkSession)
+      }
     } else {
       throw new UnsupportedOperationException(
         "Cannot add partition directly on non partitioned table")
@@ -132,6 +126,19 @@ case class CarbonAlterTableAddHivePartitionCommand(
         loadModel.setColumnCompressor(columnCompressor)
         loadModel.setCarbonTransactionalTable(true)
         loadModel.setCarbonDataLoadSchema(new CarbonDataLoadSchema(table))
+        // create operationContext to fire load events
+        val operationContext: OperationContext = new OperationContext
+        val (tableIndexes, indexOperationContext) = CommonLoadUtils.firePreLoadEvents(
+          sparkSession = sparkSession,
+          carbonLoadModel = loadModel,
+          uuid = "",
+          factPath = "",
+          null,
+          null,
+          isOverwriteTable = false,
+          isDataFrame = false,
+          updateModel = None,
+          operationContext = operationContext)
         // Create new entry in tablestatus file
         CarbonLoaderUtil.readAndUpdateLoadProgressInTableMeta(loadModel, false)
         val newMetaEntry = loadModel.getCurrentLoadMetadataDetail
@@ -140,6 +147,9 @@ case class CarbonAlterTableAddHivePartitionCommand(
             loadModel.getSegmentId, String.valueOf(loadModel.getFactTimeStamp)) +
           CarbonTablePath.SEGMENT_EXT
         newMetaEntry.setSegmentFile(segmentFileName)
+        // set path to identify it as external added partition
+        newMetaEntry.setPath(partitionSpecsAndLocsTobeAdded.asScala
+          .map(_.getLocation.toString).mkString(","))
         val segmentsLoc = CarbonTablePath.getSegmentFilesLocation(table.getTablePath)
         CarbonUtil.checkAndCreateFolderWithPermission(segmentsLoc)
         val segmentPath = segmentsLoc + CarbonCommonConstants.FILE_SEPARATOR + segmentFileName
@@ -176,6 +186,13 @@ case class CarbonAlterTableAddHivePartitionCommand(
           customSegmentIds = customSegmentIds)
         val mergeIndexEvent = AlterTableMergeIndexEvent(sparkSession, table, alterTableModel)
         OperationListenerBus.getInstance.fireEvent(mergeIndexEvent, new OperationContext)
+        // fire event to load data to materialized views
+        CommonLoadUtils.firePostLoadEvents(sparkSession,
+          loadModel,
+          tableIndexes,
+          indexOperationContext,
+          table,
+          operationContext)
       }
     }
     Seq.empty[Row]

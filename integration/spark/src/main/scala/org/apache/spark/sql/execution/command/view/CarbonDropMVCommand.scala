@@ -27,8 +27,8 @@ import org.apache.carbondata.common.exceptions.sql.MalformedMVCommandException
 import org.apache.carbondata.common.logging.LogServiceFactory
 import org.apache.carbondata.core.datastore.impl.FileFactory
 import org.apache.carbondata.core.util.CarbonProperties
-import org.apache.carbondata.events.{OperationContext, OperationListenerBus}
-import org.apache.carbondata.view.{MVCatalogInSpark, MVManagerInSpark, UpdateMVPostExecutionEvent, UpdateMVPreExecutionEvent}
+import org.apache.carbondata.events.withEvents
+import org.apache.carbondata.view.{MVCatalogInSpark, MVHelper, MVManagerInSpark, UpdateMVPostExecutionEvent, UpdateMVPreExecutionEvent}
 
 /**
  * Drop Materialized View Command implementation
@@ -38,7 +38,8 @@ case class CarbonDropMVCommand(
     databaseNameOption: Option[String],
     name: String,
     ifExistsSet: Boolean,
-    forceDrop: Boolean = false)
+    forceDrop: Boolean = false,
+    isLockAcquiredOnFactTable: String = null)
   extends AtomicRunnableCommand {
 
   private val logger = CarbonDropMVCommand.LOGGER
@@ -61,15 +62,10 @@ case class CarbonDropMVCommand(
             .getCarbonFile(databaseLocation)
             .getCanonicalPath)
         val identifier = TableIdentifier(name, Option(databaseName))
-        val operationContext = new OperationContext()
-        OperationListenerBus.getInstance().fireEvent(
-          UpdateMVPreExecutionEvent(session, systemDirectoryPath, identifier),
-          operationContext)
-        viewManager.onDrop(databaseName, name)
-        OperationListenerBus.getInstance().fireEvent(
-          UpdateMVPostExecutionEvent(session, systemDirectoryPath, identifier),
-          operationContext)
-
+        withEvents(UpdateMVPreExecutionEvent(session, systemDirectoryPath, identifier),
+          UpdateMVPostExecutionEvent(session, systemDirectoryPath, identifier)) {
+          viewManager.onDrop(databaseName, name)
+        }
         // Drop mv table.
         val dropTableCommand = CarbonDropTableCommand(
           ifExistsSet = true,
@@ -89,6 +85,10 @@ case class CarbonDropMVCommand(
             viewCatalog.deregisterSchema(schema.getIdentifier)
           }
         }
+
+        // Update the related mv table's property to mv fact tables
+        MVHelper.addOrModifyMVTablesMap(session, schema, isMVDrop = true,
+          isLockAcquiredOnFactTable = isLockAcquiredOnFactTable)
 
         this.dropTableCommand = dropTableCommand
       } else {

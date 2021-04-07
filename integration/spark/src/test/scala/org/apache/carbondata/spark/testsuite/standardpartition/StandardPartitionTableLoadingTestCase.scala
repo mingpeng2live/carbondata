@@ -95,7 +95,10 @@ class StandardPartitionTableLoadingTestCase extends QueryTest with BeforeAndAfte
         | PARTITIONED BY (empno int)
         | STORED AS carbondata
       """.stripMargin)
-    sql(s"""LOAD DATA local inpath '$resourcesPath/data.csv' INTO TABLE partitionone OPTIONS('DELIMITER'= ',', 'QUOTECHAR'= '"')""")
+    checkAnswer(
+      sql(s"""LOAD DATA local inpath '$resourcesPath/data.csv' INTO TABLE partitionone OPTIONS('DELIMITER'= ',', 'QUOTECHAR'= '"')"""),
+      Seq(Row("0"))
+    )
 
     validateDataFiles("default_partitionone", "0", 10)
 
@@ -114,7 +117,10 @@ class StandardPartitionTableLoadingTestCase extends QueryTest with BeforeAndAfte
         | PARTITIONED BY (doj Timestamp, empname String)
         | STORED AS carbondata
       """.stripMargin)
-    sql(s"""LOAD DATA local inpath '$resourcesPath/data.csv' INTO TABLE partitiontwo OPTIONS('DELIMITER'= ',', 'QUOTECHAR'= '"')""")
+    checkAnswer(
+      sql(s"""LOAD DATA local inpath '$resourcesPath/data.csv' INTO TABLE partitiontwo OPTIONS('DELIMITER'= ',', 'QUOTECHAR'= '"')"""),
+      Seq(Row("0"))
+    )
 
     validateDataFiles("default_partitiontwo", "0", 10)
 
@@ -481,8 +487,9 @@ class StandardPartitionTableLoadingTestCase extends QueryTest with BeforeAndAfte
       FileUtils.deleteDirectory(folder)
       val dataFrame = sql("select * from smallpartitionfilesread")
       val scanRdd = dataFrame.queryExecution.sparkPlan.collect {
-        case b: CarbonDataSourceScan if b.rdd.isInstanceOf[CarbonScanRDD[InternalRow]] => b.rdd
-          .asInstanceOf[CarbonScanRDD[InternalRow]]
+        case b: CarbonDataSourceScan
+          if b.inputRDDs().head.isInstanceOf[CarbonScanRDD[InternalRow]] =>
+          b.inputRDDs().head.asInstanceOf[CarbonScanRDD[InternalRow]]
       }.head
       assert(scanRdd.getPartitions.length < 10)
       assertResult(100)(dataFrame.count)
@@ -630,6 +637,23 @@ class StandardPartitionTableLoadingTestCase extends QueryTest with BeforeAndAfte
       PartitionCacheKey(carbonTable.getTableId, carbonTable.getTablePath, 1L))
     assert(partitionSpecs.size == 1)
     assert(partitionSpecs.get(0).spec.size == 2)
+    CarbonProperties.getInstance().addProperty("carbon.read.partition.hive.direct", "true")
+  }
+
+  test("test read hive partitions alternatively after compaction") {
+    CarbonProperties.getInstance().addProperty("carbon.read.partition.hive.direct", "false")
+    sql("drop table if exists partition_cache")
+    sql("create table partition_cache(a string) partitioned by(b int) stored as carbondata")
+    sql("insert into partition_cache select 'k',1")
+    sql("insert into partition_cache select 'k',1")
+    sql("insert into partition_cache select 'k',2")
+    sql("insert into partition_cache select 'k',2")
+    sql("alter table partition_cache compact 'minor'")
+    checkAnswer(sql("select count(*) from partition_cache"), Seq(Row(4)))
+    val carbonTable = CarbonMetadata.getInstance().getCarbonTable("default", "partition_cache")
+    val partitionSpecs = PartitionCacheManager.getIfPresent(
+      PartitionCacheKey(carbonTable.getTableId, carbonTable.getTablePath, 1L))
+    assert(partitionSpecs.size == 2)
     CarbonProperties.getInstance().addProperty("carbon.read.partition.hive.direct", "true")
   }
 

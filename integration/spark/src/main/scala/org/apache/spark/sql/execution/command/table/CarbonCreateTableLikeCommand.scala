@@ -26,6 +26,7 @@ import org.apache.spark.sql.execution.command.MetadataCommand
 
 import org.apache.carbondata.common.exceptions.sql.MalformedCarbonCommandException
 import org.apache.carbondata.common.logging.LogServiceFactory
+import org.apache.carbondata.core.constants.CarbonCommonConstants
 import org.apache.carbondata.core.metadata.schema.{SchemaEvolution, SchemaEvolutionEntry}
 import org.apache.carbondata.core.metadata.schema.table.{TableInfo, TableSchema}
 
@@ -48,8 +49,8 @@ case class CarbonCreateTableLikeCommand(
     if (!srcTable.isTransactionalTable) {
       throw new MalformedCarbonCommandException("Unsupported operation on non transactional table")
     }
-    if (srcTable.isMV) {
-      throw new MalformedCarbonCommandException("Unsupported operation on child table or MV")
+    if (srcTable.isMV || srcTable.isIndexTable) {
+      throw new MalformedCarbonCommandException("Unsupported operation on SI table or MV.")
     }
 
     // copy schema of source table and update fields to target table
@@ -58,6 +59,9 @@ case class CarbonCreateTableLikeCommand(
     dstTableSchema.getTableProperties.remove(srcTable.getTableId)
     dstTableSchema.setTableName(targetTable.table)
     dstTableSchema.setTableId(UUID.randomUUID().toString)
+
+    // remove mv related info from source table tblProperties
+    dstTableSchema.getTableProperties.remove(CarbonCommonConstants.RELATED_MV_TABLES_MAP)
 
     val schemaEvol: SchemaEvolution = new SchemaEvolution
     val schEntryList: util.List[SchemaEvolutionEntry] = new util.ArrayList[SchemaEvolutionEntry]
